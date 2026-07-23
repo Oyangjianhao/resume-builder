@@ -1,0 +1,551 @@
+"""
+AI 服务层：封装 DeepSeek API 调用
+职责：接收结构化用户数据 → 组装 prompt → 调用 AI → 解析返回结果
+
+v0.2：面向"简历内容生成"，输出多板块结构化内容供用户复制粘贴
+- JD 前置为分析框架
+- "重框架化叙事"替代"关键词硬塞"
+- 每条 bullet 附 match_reason（匹配说明）
+- 技能分类输出、新增求职意向/自我评价/面试话术
+"""
+import json
+import requests
+
+from config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
+from services.strengths_supplement import ensure_core_strengths_count
+from models.schemas import (
+    ResumeRequest, ResumeResponse,
+    PolishedExperience, BulletPoint, SkillGroup, InterviewTip, Education
+)
+
+
+def _build_prompt(data: ResumeRequest) -> str:
+    """
+    把用户填写的信息组装成 prompt，要求 AI 返回 JSON 格式。
+    v0.2：输出多板块内容（求职意向/概述/优势/经历/技能/自评/面试话术）
+    """
+
+    # 把教育经历拼成文本
+    edu_text = ""
+    for e in data.education:
+        edu_text += f"- {e.school}，{e.major}，{e.degree}，{e.start_year}-{e.end_year}"
+        if e.gpa:
+            edu_text += f"，GPA {e.gpa}"
+        if e.courses:
+            edu_text += f"，相关课程：{e.courses}"
+        edu_text += "\n"
+
+    # 把工作经历拼成文本
+    exp_text = ""
+    for e in data.experience:
+        exp_text += f"- 【工作经历】{e.company}，{e.role}，{e.start_date} 至 {e.end_date}\n"
+        exp_text += f"  描述：{e.description}\n"
+    for e in data.project_experience:
+        exp_text += f"- 【项目经历】{e.name}，{e.start_date} 至 {e.end_date}\n"
+        exp_text += f"  描述：{e.description}\n"
+
+    has_jd = bool(data.job_description.strip())
+
+    # ===== JD 模式 =====
+    if has_jd:
+        instruction_block = """你的核心任务：生成高度匹配目标岗位的简历内容，每段经历都要回应 JD 的具体需求。
+
+═══ 第一步：JD 深度分析（必须先做） ═══
+
+仔细阅读招聘要求，提取：
+1. 硬性要求：必须具备的技能/经验/资质
+2. 软性偏好：加分项、优先项
+3. 岗位画像：这个岗位日常在做什么？需要什么样的人？
+4. 高频关键词：JD中反复出现的技术/能力/概念
+
+根据以上分析，计算 match_score（综合匹配度百分比），规则：
+- 硬性要求每条占 15-20% 权重，完全满足→满分，部分满足→折半
+- 软性偏好占剩余权重
+- 用户有明确对口经历→加分 10-15%
+- 最终给出一个合理的百分比（如 68%、82%），附带简短说明
+
+═══ 第二步：经历重构（核心！重框架化叙事，非关键词硬塞） ═══
+
+对每段经历：
+
+A. 匹配分析：从三个维度找重合
+   - 技术栈重合（JD要MySQL → 重点写SQL优化、表设计）
+   - 能力维度重合（JD要"独立解决问题" → 突出独立攻克难关的过程）
+   - 业务场景相似（JD提到"高并发" → 强调规模和性能）
+
+B. 选择叙事角度：同一经历从不同角度写。选最贴合JD的角度。
+   例：同一个项目——JD要"全栈"就突出前后端，JD要"系统设计"就突出架构，JD要"用户体验"就突出需求分析。
+
+C. 重写每个 bullet（必须用求职者第一人称视角）：
+   - 用"我"开头，以求职者身份讲述自己做了什么、怎么做的、取得了什么成果
+   - 正确示例："我独立设计了多维度筛选功能，将客户信息检索效率提升了30%"
+   - 错误示例："针对XX需求，做了..." "实现了XX功能，提升了XX" （这是HR评价语气，禁止！）
+   - 每条bullet要让人读到的是一个真实的人在讲述自己的经历，而不是一份冷冰冰的项目报告
+   - JD提到的技术/工具，项目里用到的必须显式出现
+   - 用数据量化成果（没有精确数据则合理估算）
+   - 禁止泛泛描述（"参与了XX""负责XX模块"），写清做了什么、怎么做的、效果如何
+   - 每条 bullet 附 match_reason：用一句话说明这条在回应JD的哪个要求
+   - 每条 bullet 标 match_score：high（直接回应硬性要求）/ medium（回应软性偏好）/ low（通用能力）
+
+D. 篇幅策略（硬性要求，不可打折）：
+   - 每段经历必须生成恰好 5 个 bullet，不多不少
+   - 无论经历与JD匹配度高低，都必须写满 5 条
+   - 高匹配经历：从技术能力、业务成果、问题解决、团队协作等多维度展开
+   - 低匹配经历：从可迁移能力角度挖掘（沟通能力、学习能力、抗压能力、执行力等）
+   - 绝对不允许只写1-2条就结束，这是最常见的错误，必须避免
+
+═══ 第三步：其他板块 ═══
+
+- 求职意向（job_objective）：一行话，格式"求职意向：{目标岗位} · {城市} · {到岗时间}"。城市根据用户信息或JD推断，到岗时间默认"2周内"
+- 职业概述（career_summary）：2-3句话，用求职者第一人称视角写。要求：
+  - 第一句直击"我能为公司带来什么"，点明核心竞争力与目标岗位的契合点
+  - 第二句用1-2个最有说服力的事实/数据佐证
+  - 第三句表达职业意愿和态度（自然真诚，不要喊口号）
+  - 整体控制在80-120字，精炼有力，每个字都要有信息量
+  - 禁止写成HR评语式（"具备XX背景""擅长XX"这种空洞表述）
+- 核心优势（core_strengths）：必须生成恰好6条，这是硬性要求，不能少于6条。
+  每条用求职者第一人称视角，格式："我具备XX能力——在XX中我做了YY，达到了ZZ效果"。先说能力，再用事实佐证。不要写成HR评价式。
+  素材来源（必须从以下所有维度挖掘，凑够6条）：
+  ① 项目/工作经历中的技术能力或业务能力（2-3条）
+  ② 教育背景带来的学习能力或专业素养（1条）
+  ③ 兼职/校园经历体现的软实力（沟通/领导力/执行力等，1-2条）
+  ④ 性格特质或职业态度（抗压/自驱/好奇心等，1条）
+  即使某个维度素材较弱，也要合理推断生成，绝不允许少于6条。
+- 自我评价（self_evaluation）：3-4句话，用求职者第一人称。根据JD看重的软素质定制（如JD要"抗压"就体现韧性，要"学习能力"就体现快速成长）。不要空喊口号，用经历中的事实支撑。语气自然真实，像自己写给自己看的总结。
+- 技能清单（skills）：按类别分组（编程语言 / 框架工具 / 数据库 / 语言能力 / 其他），每类列出具体技能。JD最看重的类别排前面
+- 面试话术（interview_tips）：对每段经历生成2-3个面试问题和回答思路。问题要具体（不要"请介绍一下这个项目"这种泛问），回答思路要结合经历中的具体场景
+
+═══ 第四步：自我验证 ═══
+
+检查每个 bullet：
+- 是否用了第一人称"我"开头？不是→改写
+- 语气是否像HR在评价别人（"针对XX需求做了""实现了XX功能"）？是→改为求职者自述（"我做了XX，达到了YY"）
+- 这条在回应JD的哪个要求？答不上来→改写
+- 面试官看到会觉得"这个人很适合"吗？不会→换角度
+- bullet之间信息重复？→合并
+
+检查每段经历的 bullet 数量：
+- 每段经历是否有 5 个 bullet？少于5个→补充，多于5个→删减
+- 低匹配经历是否只有1-2条？是→从可迁移能力角度补充到5条
+
+检查 core_strengths：
+- 每条能力关键词是否有记忆点？笼统的→换更精准的
+- 证明部分是否有事实/数据支撑？空洞的→补充具体细节
+- 有没有写成HR评价式（"通过XX体现了XX能力"）？有→改写为第一人称
+- 是否每条都跟JD有明确关联？不相关的→替换为更匹配JD的
+
+检查 jd_analysis：
+- match_score 是否合理（不虚高也不偏低）？不合理→重新评估
+- gaps 中每条是否有具体的 suggestion（不是泛泛的"多学习"）？空洞→补充可操作的改进路径
+- gaps 是否覆盖了所有硬性要求的短板？遗漏→补充
+
+        """
+
+        format_block = """
+返回格式（严格 JSON，不要包含任何其他文字）：
+{
+  "jd_analysis": {
+    "match_score": "72%（基于JD硬性要求/软性偏好的综合匹配度，供参考）",
+    "key_requirements": ["JD核心要求1", "核心要求2", "..."],
+    "matched_projects": ["项目名(匹配理由)", "..."],
+    "gaps": [
+      {"gap": "缺少的能力/经验描述", "suggestion": "具体改进建议：可从XX方向入手，通过XX方式快速补足"}
+    ]
+  },
+  "job_objective": "求职意向：Java后端开发工程师 · 广州 · 2周内到岗",
+  "career_summary": "1-2句话的职业概述，第一句直击JD核心需求",
+  "core_strengths": [
+    "我具备XX能力——在项目中我做了YY（来自项目经历）",
+    "我具备XX能力——在项目中我做了YY（来自项目经历）",
+    "我具备XX能力——在项目中我做了YY（来自项目经历）",
+    "我具备XX学习能力——在校期间我XX（来自教育背景）",
+    "我具备XX能力——通过XX经历证明了这一点（来自兼职/校园经历）",
+    "我具备XX特质——这体现在我XX的行为中（来自性格/态度）"
+  ],
+  "experience": [
+    {
+      "type": "work",
+      "company": "公司名",
+      "role": "职位",
+      "start_date": "开始时间",
+      "end_date": "结束时间",
+      "jd_match": ["该经历回应的JD核心要求1", "要求2"],
+      "bullets": [
+        { "text": "我独立完成了XX功能的设计与开发，将XX效率提升了XX%", "match_reason": "对应JD中'XX能力'的要求", "match_score": "high" },
+        { "text": "我主动梳理了XX流程，解决了XX问题", "match_reason": "...", "match_score": "high" },
+        { "text": "我与XX协作完成了XX任务", "match_reason": "...", "match_score": "medium" },
+        { "text": "我通过XX方法快速掌握了XX技能", "match_reason": "...", "match_score": "medium" },
+        { "text": "我在XX过程中锻炼了XX能力", "match_reason": "...", "match_score": "low" }
+      ]
+    },
+    {
+      "type": "project",
+      "name": "项目名称",
+      "start_date": "开始时间",
+      "end_date": "结束时间",
+      "jd_match": ["该项目回应的JD核心要求"],
+      "bullets": [
+        { "text": "我负责了XX模块，实现了XX效果", "match_reason": "...", "match_score": "high" },
+        { "text": "我...", "match_reason": "...", "match_score": "medium" },
+        { "text": "我...", "match_reason": "...", "match_score": "medium" },
+        { "text": "我...", "match_reason": "...", "match_score": "low" },
+        { "text": "我...", "match_reason": "...", "match_score": "low" }
+      ]
+    }
+  ],
+  "skills": [
+    { "category": "编程语言", "items": ["Java（熟练）", "Python（熟悉）"] },
+    { "category": "框架/工具", "items": ["Spring Boot", "React"] },
+    { "category": "数据库", "items": ["MySQL", "Redis"] }
+  ],
+  "certificates": ["英语CET-4"],
+  "self_evaluation": "3-4句话的自我评价，根据JD看重的软素质定制，用事实支撑而非空喊口号",
+  "interview_tips": [
+    {
+      "experience_name": "项目名/公司名",
+      "questions": [
+        { "question": "针对这段经历的具体面试问题", "answer_hint": "结合项目场景的回答思路" },
+        { "question": "...", "answer_hint": "..." }
+      ]
+    }
+  ]
+}
+
+字段说明：
+- bullets 中每个对象必须包含 text + match_reason + match_score 三个字段
+- match_score 取值：high（直接回应JD硬性要求）/ medium（回应软性偏好）/ low（通用能力）
+- skills 按类别分组，每类 2-5 个具体技能
+- interview_tips 每段经历 2-3 个问题，问题要具体化（如"你在这个项目中遇到的最大技术挑战是什么？"）
+- 如果某段经历与JD确实无关，jd_match为空数组，但仍需从可迁移能力角度生成恰好5个bullets
+- jd_analysis.match_score 格式为百分比+简短说明（如 "68%（硬性要求基本满足，分布式经验欠缺）"）
+- jd_analysis.gaps 中每个对象包含 gap（问题描述）和 suggestion（具体改进建议，至少20字，有可操作性）
+        """
+
+        prompt = f"""你是一个资深简历顾问，同时具备招聘方的视角。你的任务是让候选人的简历内容高度匹配目标岗位。
+
+{instruction_block}
+
+格式注意：
+- 工作经历 type="work"，含 company + role；项目经历 type="project"，只需 name。保持 type 与用户输入一致。
+- certificates：事实性凭证（含"证""级""考试""资格"等关键词），原样列出。
+- 技能和证书如果用户没区分，请自行判断分类。
+{format_block}
+
+===== 目标岗位招聘信息（JD） =====
+所有经历改写都要围绕这个JD展开：
+
+{data.job_description}
+
+===== 候选人信息 =====
+
+姓名：{data.personal.name}
+手机：{data.personal.phone}
+邮箱：{data.personal.email}
+目标岗位：{data.target_position}
+
+教育经历：
+{edu_text}
+
+工作/项目经历：
+{exp_text}
+
+技能与证书：
+{data.skills}
+"""
+
+    # ===== 无 JD 模式 =====
+    else:
+        instruction_block = """请按以下步骤处理：
+
+第一步 — 经历优化：
+将每段经历改写为 STAR 法则格式（Situation-Task-Action-Result）
+- 必须用求职者第一人称"我"开头，讲述自己做了什么、取得了什么成果
+- 正确示例："我独立开发了XX模块，将XX效率提升了30%"
+- 错误示例："实现了XX功能""针对XX需求做了..."（HR评价语气，禁止！）
+- 突出与目标岗位相关的能力和成果
+- 用数据量化成果（没有数据则合理估算）
+- 每段经历必须恰好 5 个要点，供用户挑选保留
+- 每条 bullet 附 match_reason（说明这条体现了什么能力）和 match_score（high/medium/low）
+
+第二步 — 其他板块：
+- 求职意向（job_objective）：一行话，格式"求职意向：{目标岗位} · 城市 · 到岗时间"
+- 职业概述（career_summary）：1-2句话，用求职者第一人称视角，说明我能为目标岗位带来什么价值
+- 核心优势（core_strengths）：为每段经历提炼1条核心优势，格式"能力关键词：一句话证明"，精炼有力
+- 自我评价（self_evaluation）：3-4句话，体现性格、态度、职业追求
+- 技能清单（skills）：按类别分组（编程语言 / 框架工具 / 数据库 / 语言能力）
+- 面试话术（interview_tips）：每段经历2-3个面试问题和回答思路"""
+
+        format_block = """
+返回格式（严格 JSON）：
+{
+  "job_objective": "求职意向：XX岗位 · 城市 · 到岗时间",
+  "career_summary": "1-2句话的职业概述",
+  "core_strengths": ["核心优势1（项目能力）", "核心优势2（项目能力）", "核心优势3（项目能力）", "核心优势4（教育/学习能力）", "核心优势5（软实力/校园经历）", "核心优势6（性格特质）"],
+  "experience": [
+    {
+      "type": "work",
+      "company": "公司名",
+      "role": "职位",
+      "start_date": "开始时间",
+      "end_date": "结束时间",
+      "jd_match": [],
+      "bullets": [
+        { "text": "要点1", "match_reason": "体现了XX能力", "match_score": "medium" }
+      ]
+    },
+    {
+      "type": "project",
+      "name": "项目名称",
+      "start_date": "开始时间",
+      "end_date": "结束时间",
+      "jd_match": [],
+      "bullets": [
+        { "text": "要点1", "match_reason": "体现了XX能力", "match_score": "medium" }
+      ]
+    }
+  ],
+  "skills": [
+    { "category": "编程语言", "items": ["Java", "Python"] },
+    { "category": "框架/工具", "items": ["Spring Boot"] }
+  ],
+  "certificates": ["证书1"],
+  "self_evaluation": "3-4句话的自我评价",
+  "interview_tips": [
+    {
+      "experience_name": "项目名",
+      "questions": [
+        { "question": "面试问题", "answer_hint": "回答思路" }
+      ]
+    }
+  ]
+}"""
+
+        prompt = f"""你是一个资深简历顾问。请根据以下用户信息，生成专业的简历内容。
+
+{instruction_block}
+
+格式注意：
+- 工作经历 type="work"，含 company + role；项目经历 type="project"，只需 name。保持 type 与用户输入一致。
+- certificates：事实性凭证（含"证""级""考试""资格"等关键词），原样列出。
+- 技能和证书如果用户没区分，请自行判断分类。
+{format_block}
+
+===== 用户信息 =====
+
+姓名：{data.personal.name}
+手机：{data.personal.phone}
+邮箱：{data.personal.email}
+目标岗位：{data.target_position}
+
+教育经历：
+{edu_text}
+
+工作/项目经历：
+{exp_text}
+
+技能与证书：
+{data.skills}
+"""
+
+    return prompt
+
+
+def _call_deepseek(prompt: str, has_jd: bool = False) -> dict:
+    """调用 DeepSeek API，返回原始响应"""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
+
+    if has_jd:
+        system_msg = (
+            "你是一个专业的简历内容顾问，同时具备招聘方视角。"
+            "核心原则：职业概述和核心优势要精炼有力，每个字都有信息量，优先展示与JD最匹配的能力。"
+            "你必须严格按照用户要求的JSON格式返回结果，不要包含任何额外文字。"
+            "核心原则：每个bullet都必须让面试官觉得'这个人的经历跟我们的岗位很匹配'。"
+        )
+    else:
+        system_msg = (
+            "你是一个专业的简历内容顾问。"
+            "你必须严格按照用户要求的JSON格式返回结果，不要包含任何额外文字。"
+        )
+
+    data = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.5 if has_jd else 0.3,
+        # v0.2 输出更多板块，token 额度提高
+        "max_tokens": 10000 if has_jd else 7000
+    }
+
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=data, timeout=120)
+    response.raise_for_status()
+    return response.json()
+
+
+def _parse_ai_response(ai_content: str) -> dict:
+    """从 AI 返回的文本中提取 JSON，容错处理"""
+    text = ai_content.strip()
+
+    if "```json" in text:
+        start = text.index("```json") + 7
+        end = text.index("```", start)
+        text = text[start:end].strip()
+    elif "```" in text:
+        start = text.index("```") + 3
+        end = text.index("```", start)
+        text = text[start:end].strip()
+
+    return json.loads(text)
+
+
+def _normalize_bullets(raw_bullets: list) -> list[BulletPoint]:
+    """
+    兼容处理：AI 可能返回纯字符串数组或对象数组。
+    统一转为 BulletPoint 对象列表。
+    """
+    result = []
+    for b in raw_bullets:
+        if isinstance(b, str):
+            result.append(BulletPoint(text=b, match_reason="", match_score="medium"))
+        elif isinstance(b, dict):
+            result.append(BulletPoint(
+                text=b.get("text", ""),
+                match_reason=b.get("match_reason", ""),
+                match_score=b.get("match_score", "medium")
+            ))
+    return result
+
+
+def _normalize_skills(raw_skills) -> list[SkillGroup]:
+    """
+    兼容处理：AI 可能返回分类对象数组或旧的纯字符串数组。
+    统一转为 SkillGroup 对象列表。
+    """
+    if not raw_skills:
+        return []
+
+    # 如果第一个元素是 dict（新格式），直接解析
+    if isinstance(raw_skills[0], dict):
+        groups = []
+        for s in raw_skills:
+            groups.append(SkillGroup(
+                category=s.get("category", "其他"),
+                items=s.get("items", [])
+            ))
+        return groups
+
+    # 如果第一个元素是 str（旧格式），全部塞到"专业技能"分组
+    if isinstance(raw_skills[0], str):
+        return [SkillGroup(category="专业技能", items=raw_skills)]
+
+    return []
+
+
+def _normalize_interview_tips(raw_tips: list) -> list[InterviewTip]:
+    """解析面试话术"""
+    result = []
+    for tip in raw_tips:
+        if isinstance(tip, dict):
+            result.append(InterviewTip(
+                experience_name=tip.get("experience_name", ""),
+                questions=tip.get("questions", [])
+            ))
+    return result
+
+
+def _normalize_jd_analysis(raw: dict) -> dict:
+    """
+    归一化 JD 分析结果，确保 match_score 存在、gaps 每条都是 {gap, suggestion} 对象。
+    AI 模型不一定严格遵循格式，这里做兜底处理。
+    """
+    analysis = dict(raw) if raw else {}
+
+    # match_score 兜底：如果 AI 没返回，给空字符串（前端判断显示）
+    if "match_score" not in analysis:
+        analysis["match_score"] = ""
+
+    # gaps 归一化：字符串 → {gap, suggestion} 对象
+    raw_gaps = analysis.get("gaps", [])
+    normalized_gaps = []
+    for item in raw_gaps:
+        if isinstance(item, str):
+            normalized_gaps.append({"gap": item, "suggestion": ""})
+        elif isinstance(item, dict):
+            normalized_gaps.append({
+                "gap": item.get("gap", ""),
+                "suggestion": item.get("suggestion", ""),
+            })
+    analysis["gaps"] = normalized_gaps
+
+    return analysis
+
+
+def generate_resume(data: ResumeRequest) -> ResumeResponse:
+    """主入口：接收用户数据 → 调 AI → 返回结构化简历内容"""
+    has_jd = bool(data.job_description.strip())
+    prompt = _build_prompt(data)
+    result = _call_deepseek(prompt, has_jd=has_jd)
+
+    ai_content = result["choices"][0]["message"]["content"]
+    usage = result.get("usage", {})
+    parsed = _parse_ai_response(ai_content)
+
+    # 按类型拆分经历
+    all_exp = parsed.get("experience", [])
+    work_exp = []
+    project_exp = []
+    for exp in all_exp:
+        exp_type = exp.get("type", "")
+        if not exp_type:
+            exp_type = "work" if exp.get("company") else "project"
+            exp["type"] = exp_type
+
+        # 兼容处理 bullets（新格式: 对象数组 / 旧格式: 字符串数组）
+        exp["bullets"] = _normalize_bullets(exp.get("bullets", []))
+
+        if exp_type == "work":
+            work_exp.append(PolishedExperience(**exp))
+        else:
+            project_exp.append(PolishedExperience(**exp))
+
+    # 解析技能（新格式: SkillGroup[] / 旧格式: str[]）
+    skills = _normalize_skills(parsed.get("skills", []))
+
+    # 解析面试话术
+    interview_tips = _normalize_interview_tips(parsed.get("interview_tips", []))
+
+    return ResumeResponse(
+        name=data.personal.name,
+        phone=data.personal.phone,
+        email=data.personal.email,
+        target_position=data.target_position,
+        # v0.2 新板块
+        job_objective=parsed.get("job_objective", ""),
+        career_summary=parsed.get("career_summary", ""),
+        core_strengths=ensure_core_strengths_count(
+            parsed.get("core_strengths", []), has_jd,
+            data.job_description if has_jd else "", data.target_position
+        ),
+        self_evaluation=parsed.get("self_evaluation", ""),
+        interview_tips=interview_tips,
+        # 经历
+        education=data.education,
+        experience=work_exp,
+        project_experience=project_exp,
+        # 技能 & 证书
+        skills=skills,
+        certificates=parsed.get("certificates", []),
+        # 分析 & 元数据
+        jd_analysis=_normalize_jd_analysis(parsed.get("jd_analysis", {})),
+        token_usage={
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        },
+        # 向后兼容
+        summary=parsed.get("summary", parsed.get("career_summary", "")),
+    )

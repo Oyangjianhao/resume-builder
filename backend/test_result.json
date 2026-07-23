@@ -1,0 +1,37 @@
+{
+  "name": "欧阳键濠",
+  "phone": "13800138000",
+  "email": "ouyang@example.com",
+  "target_position": "Java后端开发工程师",
+  "summary": "具备扎实的Java后端开发基础，熟悉Spring Boot框架及Redis缓存技术，能够独立完成接口优化与系统性能调优。在实习期间通过重构订单管理接口和引入缓存机制，显著提升系统响应速度，展现出良好的问题解决能力和代码质量意识。",
+  "education": [
+    {
+      "school": "广东培正学院",
+      "major": "软件工程",
+      "degree": "本科",
+      "start_year": "2023",
+      "end_year": "2027",
+      "gpa": "3.5/4.0",
+      "courses": "数据结构、数据库原理"
+    }
+  ],
+  "experience": [
+    {
+      "company": "XX科技",
+      "role": "Java后端实习生",
+      "start_date": "2025-07",
+      "end_date": "2025-09",
+      "bullets": [
+        "基于Spring Boot重构订单管理系统的核心接口，优化了订单查询、创建和更新流程，接口响应时间降低约40%。",
+        "引入Redis缓存机制，缓存高频访问的订单数据，减少数据库查询压力，系统吞吐量提升约30%。",
+        "修复了订单状态同步、库存扣减等关键业务逻辑的Bug，编写JUnit单元测试覆盖率达85%，确保代码稳定性和可维护性。"
+      ]
+    }
+  ],
+  "skills": "Java, Spring Boot, MySQL, Redis, Git",
+  "token_usage": {
+    "input_tokens": 407,
+    "output_tokens": 231,
+    "total_tokens": 638
+  }
+}

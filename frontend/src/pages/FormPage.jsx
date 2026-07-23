@@ -1,0 +1,467 @@
+/**
+ * 信息填写页（分步表单）
+ * 5 个步骤：基本信息 → 目标岗位 → 教育经历 → 经历 → 技能证书 + 生成
+ */
+import { useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import useResumeStore from '../store/resumeStore'
+import { generateResume, analyzeProject } from '../services/api'
+
+const STEPS = ['基本信息', '目标岗位', '教育经历', '经历', '技能证书']
+
+// ===== 通用输入组件（放在 FormPage 外面，避免每次渲染被重建） =====
+function Input({ label, value, onChange, placeholder, required }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} {required && <span className="text-red-400">*</span>}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
+      />
+    </div>
+  )
+}
+
+function TextArea({ label, value, onChange, placeholder, rows = 4 }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500"
+      />
+    </div>
+  )
+}
+
+// ===== 主组件 =====
+export default function FormPage() {
+  const navigate = useNavigate()
+  const store = useResumeStore()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [jdTab, setJdTab] = useState('manual') // 'manual' | 'jd'
+  const [analyzing, setAnalyzing] = useState(-1) // 正在分析的项目经历 index，-1 表示无
+  const [analysisResult, setAnalysisResult] = useState({}) // 各项目经历的分析结果
+  const fileInputRef = useRef(null)
+  const analyzingIndexRef = useRef(-1) // 当前正在上传的项目索引
+
+  // ===== 项目文件分析 =====
+  async function handleAnalyze(index) {
+    analyzingIndexRef.current = index
+    fileInputRef.current?.click()
+  }
+
+  async function handleFileSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const index = analyzingIndexRef.current
+    setAnalyzing(index)
+
+    try {
+      const result = await analyzeProject(file, '', store.targetPosition, store.jobDescription)
+      // 将分析结果的 bullets 填入项目描述
+      const project = store.projectExperience[index]
+      if (project && result.bullets?.length > 0) {
+        const newList = [...store.projectExperience]
+        newList[index] = {
+          ...project,
+          description: project.description
+            ? project.description + '\n\n[AI 分析]\n' + result.bullets.join('\n')
+            : '[AI 分析]\n' + result.bullets.join('\n'),
+        }
+        store.setProjectExperience(newList)
+      }
+      // 保存完整分析结果（面试准备清单等）
+      setAnalysisResult((prev) => ({ ...prev, [index]: result }))
+      // 存储到 store 的面试准备清单（取最新的一个）
+      if (result.interview_prep) {
+        store.setInterviewPrep(result)
+      }
+    } catch (err) {
+      setError(err.message || '项目分析失败')
+    } finally {
+      setAnalyzing(-1)
+      // 清空 file input，允许重复上传同一文件
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // ===== 点击"AI 生成简历" =====
+  async function handleGenerate() {
+    if (!store.targetPosition) {
+      setError('请先填写目标岗位')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const data = store.buildRequestData()
+      const result = await generateResume(data)
+      store.setGeneratedResume(result)
+      navigate('/preview')
+    } catch (e) {
+      setError(e.message || '生成失败，请检查后端服务是否启动')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ===== 渲染当前步骤的内容 =====
+  function renderStep() {
+    // ----- 第 1 步：基本信息 -----
+    if (store.currentStep === 1) {
+      const p = store.personal
+      const update = (key, val) => store.setPersonal({ ...p, [key]: val })
+      return (
+        <div>
+          <h3 className="text-lg font-bold text-slate-800 mb-4">基本信息</h3>
+          <Input label="姓名" value={p.name} onChange={(v) => update('name', v)} placeholder="请输入姓名" required />
+          <Input label="手机号" value={p.phone} onChange={(v) => update('phone', v)} placeholder="请输入手机号" required />
+          <Input label="邮箱" value={p.email} onChange={(v) => update('email', v)} placeholder="请输入邮箱" required />
+          <Input label="一句话介绍自己（选填）" value={p.selfIntro} onChange={(v) => update('selfIntro', v)} placeholder="一句话介绍自己，比如：学习方向、性格特点" />
+        </div>
+      )
+    }
+
+    // ----- 第 2 步：目标岗位 + JD -----
+    if (store.currentStep === 2) {
+      return (
+        <div>
+          <h3 className="text-lg font-bold text-slate-800 mb-4">目标岗位</h3>
+
+          {/* Tab 切换 */}
+          <div className="flex mb-4 border-b">
+            <button
+              onClick={() => setJdTab('manual')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                jdTab === 'manual'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              手动输入岗位名称
+            </button>
+            <button
+              onClick={() => setJdTab('jd')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                jdTab === 'jd'
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              粘贴招聘信息
+            </button>
+          </div>
+
+          {/* Tab 1：手动输入 */}
+          {jdTab === 'manual' && (
+            <div>
+              <Input
+                label="你想应聘什么岗位？"
+                value={store.targetPosition}
+                onChange={store.setTargetPosition}
+                placeholder="比如：Java后端开发工程师"
+                required
+              />
+              <p className="text-sm text-gray-400 mt-1">
+                AI 会根据目标岗位调整简历的侧重点和关键词
+              </p>
+            </div>
+          )}
+
+          {/* Tab 2：粘贴 JD */}
+          {jdTab === 'jd' && (
+            <div>
+              <Input
+                label="岗位名称"
+                value={store.targetPosition}
+                onChange={store.setTargetPosition}
+                placeholder="比如：Java后端开发工程师"
+                required
+              />
+              <TextArea
+                label="招聘信息（从招聘平台复制粘贴）"
+                value={store.jobDescription}
+                onChange={store.setJobDescription}
+                placeholder={"从 Boss 直聘、拉勾、牛客等招聘平台复制岗位描述和任职要求，粘贴到这里。\n\n例如：\n岗位职责：\n1. 负责公司后端系统的开发与维护\n2. 参与系统架构设计...\n\n任职要求：\n1. 本科及以上学历，计算机相关专业\n2. 3年以上 Java 开发经验..."}
+                rows={8}
+              />
+              <p className="text-sm text-gray-400 mt-1">
+                AI 会根据 JD 中的关键词精准调整简历，突出匹配的技能和经历
+              </p>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    // ----- 第 3 步：教育经历 -----
+    if (store.currentStep === 3) {
+      const list = store.education
+      const updateItem = (index, key, val) => {
+        const newList = [...list]
+        newList[index] = { ...newList[index], [key]: val }
+        store.setEducation(newList)
+      }
+      return (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-slate-800">教育经历</h3>
+            <button onClick={store.addEducation} className="text-primary-600 text-sm hover:underline">+ 添加一段</button>
+          </div>
+          {list.length === 0 && (
+            <p className="text-gray-400 text-sm text-center py-8">还没有添加教育经历，点上方"+ 添加一段"</p>
+          )}
+          {list.map((edu, i) => (
+            <div key={i} className="border border-gray-200 rounded-lg p-4 mb-4 relative">
+              {list.length > 1 && (
+                <button onClick={() => store.removeEducation(i)} className="absolute top-2 right-2 text-red-400 text-sm hover:text-red-600">删除</button>
+              )}
+              <Input label="学校" value={edu.school} onChange={(v) => updateItem(i, 'school', v)} placeholder="请输入学校名称" />
+              <Input label="专业" value={edu.major} onChange={(v) => updateItem(i, 'major', v)} placeholder="请输入专业名称" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">学历</label>
+                  <select
+                    value={edu.degree}
+                    onChange={(e) => updateItem(i, 'degree', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                  >
+                    <option value="" disabled>请选择学历</option>
+                    <option>本科</option>
+                    <option>硕士</option>
+                    <option>博士</option>
+                    <option>大专</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="入学年份" value={edu.startYear} onChange={(v) => updateItem(i, 'startYear', v)} placeholder="如 2023" />
+                  <Input label="毕业年份" value={edu.endYear} onChange={(v) => updateItem(i, 'endYear', v)} placeholder="如 2027" />
+                </div>
+              </div>
+              <Input label="GPA（选填）" value={edu.gpa} onChange={(v) => updateItem(i, 'gpa', v)} placeholder="如 3.5/4.0" />
+              <Input label="相关课程（选填）" value={edu.courses} onChange={(v) => updateItem(i, 'courses', v)} placeholder="如：数据结构、数据库原理、软件工程" />
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    // ----- 第 4 步：工作经历 + 项目经历 -----
+    if (store.currentStep === 4) {
+      const workList = store.workExperience
+      const projectList = store.projectExperience
+      const updateWork = (index, key, val) => {
+        const newList = [...workList]
+        newList[index] = { ...newList[index], [key]: val }
+        store.setWorkExperience(newList)
+      }
+      const updateProject = (index, key, val) => {
+        const newList = [...projectList]
+        newList[index] = { ...newList[index], [key]: val }
+        store.setProjectExperience(newList)
+      }
+      const totalExp = workList.length + projectList.length
+      return (
+        <div>
+          <h3 className="text-lg font-bold text-slate-800 mb-2">经历</h3>
+          <p className="text-sm text-gray-400 mb-4">
+            工作经历和项目经历可以自由混合添加
+            {store.targetPosition && (
+              <span className="ml-2 text-primary-500">· 目标：{store.targetPosition}</span>
+            )}
+          </p>
+
+          {/* 两个添加按钮 */}
+          <div className="flex gap-3 mb-6">
+            <button onClick={store.addWorkExperience} className="text-primary-600 text-sm border border-primary-200 rounded-lg px-3 py-2 hover:bg-primary-50">+ 添加工作经历</button>
+            <button onClick={store.addProjectExperience} className="text-green-600 text-sm border border-green-200 rounded-lg px-3 py-2 hover:bg-green-50">+ 添加项目经历</button>
+          </div>
+
+          {totalExp === 0 && (
+            <p className="text-gray-400 text-sm text-center py-8">还没有添加经历，点击上方按钮添加</p>
+          )}
+
+          {/* 工作经历卡片 */}
+          {workList.map((exp, i) => (
+            <div key={`work-${i}`} className="border border-primary-100 bg-primary-50/30 rounded-lg p-4 mb-4 relative">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-primary-600 bg-primary-100 px-2 py-0.5 rounded">工作经历</span>
+                {totalExp > 1 && (
+                  <button onClick={() => store.removeWorkExperience(i)} className="text-red-400 text-sm hover:text-red-600">删除</button>
+                )}
+              </div>
+              <Input label="公司名称" value={exp.company} onChange={(v) => updateWork(i, 'company', v)} placeholder="XX科技有限公司" />
+              <Input label="职位" value={exp.role} onChange={(v) => updateWork(i, 'role', v)} placeholder="请输入职位名称" />
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="开始时间" value={exp.startDate} onChange={(v) => updateWork(i, 'startDate', v)} placeholder="如 2025-07" />
+                <Input label="结束时间" value={exp.endDate} onChange={(v) => updateWork(i, 'endDate', v)} placeholder="如 2025-09" />
+              </div>
+              <TextArea
+                label="做了什么（随意写，AI 会帮你润色成专业语言）"
+                value={exp.description}
+                onChange={(v) => updateWork(i, 'description', v)}
+                placeholder="比如：帮公司改了个老系统，用 Spring Boot 重写了接口，加了缓存，速度快了不少..."
+                rows={5}
+              />
+            </div>
+          ))}
+
+          {/* 项目经历卡片 */}
+          {projectList.map((exp, i) => (
+            <div key={`project-${i}`} className="border border-green-100 bg-green-50/30 rounded-lg p-4 mb-4 relative">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded">项目经历</span>
+                {totalExp > 1 && (
+                  <button onClick={() => store.removeProjectExperience(i)} className="text-red-400 text-sm hover:text-red-600">删除</button>
+                )}
+              </div>
+              <Input label="项目名称" value={exp.name} onChange={(v) => updateProject(i, 'name', v)} placeholder="请输入项目名称" />
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="开始时间" value={exp.startDate} onChange={(v) => updateProject(i, 'startDate', v)} placeholder="如 2025-07" />
+                <Input label="结束时间" value={exp.endDate} onChange={(v) => updateProject(i, 'endDate', v)} placeholder="如 2025-09" />
+              </div>
+              <TextArea
+                label="做了什么（随意写，AI 会帮你润色成专业语言）"
+                value={exp.description}
+                onChange={(v) => updateProject(i, 'description', v)}
+                placeholder="比如：做了个微信小程序，用户可以在线报修、预约师傅，后台用 Spring Boot + MySQL..."
+                rows={5}
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={() => handleAnalyze(i)}
+                  disabled={analyzing === i}
+                  className="text-sm text-green-700 border border-green-300 rounded-lg px-3 py-1.5 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {analyzing === i ? '分析中...' : '导入项目文件深度分析'}
+                </button>
+                {analysisResult[i] && (
+                  <span className="text-xs text-green-600">
+                    已分析 · 识别技术栈: {(analysisResult[i].tech_stack || []).join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* 隐藏的文件上传 input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip,.docx,.pdf,.txt,.md"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+        </div>
+      )
+    }
+
+    // ----- 第 5 步：技能证书 + 生成 -----
+    if (store.currentStep === 5) {
+      return (
+        <div>
+          <h3 className="text-lg font-bold text-slate-800 mb-4">技能与证书</h3>
+          <TextArea
+            label="列出你的技术栈、语言能力、证书等"
+            value={store.skills}
+            onChange={store.setSkills}
+            placeholder={"比如：Java, Spring Boot, MySQL, Redis, Git\n英语 CET-4\n软件设计师（中级）"}
+            rows={6}
+          />
+
+          {/* 生成提示 */}
+          <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-800 font-medium">准备生成简历</p>
+            <p className="text-xs text-green-600 mt-1">
+              点击下方按钮，AI 将根据你的目标岗位
+              {store.jobDescription ? '和招聘信息' : ''}
+              智能润色所有经历，生成专业简历。
+            </p>
+          </div>
+        </div>
+      )
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-surface py-8">
+      <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-card p-8">
+        {/* 步骤指示器 */}
+        <div className="flex items-start mb-8">
+          {STEPS.flatMap((label, i) => {
+            const step = (
+              <div key={`step-${i}`} className="flex flex-col items-center shrink-0">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                  i + 1 <= store.currentStep
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-200 text-gray-400'
+                }`}>
+                  {i + 1}
+                </div>
+                <span className={`text-xs mt-1 whitespace-nowrap ${
+                  i + 1 === store.currentStep ? 'text-primary-600 font-medium' : 'text-gray-400'
+                }`}>
+                  {label}
+                </span>
+              </div>
+            )
+            if (i === STEPS.length - 1) return [step]
+            return [step, (
+              <div key={`line-${i}`} className={`flex-1 h-0.5 mx-2 mt-4 ${
+                i + 1 < store.currentStep ? 'bg-primary-600' : 'bg-gray-200'
+              }`} />
+            )]
+          })}
+        </div>
+
+        {/* 当前步骤的内容 */}
+        {renderStep()}
+
+        {/* 底部按钮 */}
+        <div className="flex justify-between mt-8 pt-4 border-t">
+          <button
+            onClick={() => store.currentStep === 1 ? navigate('/') : store.prevStep()}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            {store.currentStep === 1 ? '返回首页' : '上一步'}
+          </button>
+
+          {store.currentStep < 5 ? (
+            <button
+              onClick={store.nextStep}
+              className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700"
+            >
+              下一步
+            </button>
+          ) : (
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700 disabled:bg-gray-400"
+            >
+              {loading ? 'AI 正在生成...' : 'AI 生成简历'}
+            </button>
+          )}
+        </div>
+
+        {/* 错误提示 */}
+        {error && (
+          <p className="text-red-500 text-sm mt-4 text-center">{error}</p>
+        )}
+      </div>
+    </div>
+  )
+}
