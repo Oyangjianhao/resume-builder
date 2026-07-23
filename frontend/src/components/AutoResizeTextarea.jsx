@@ -29,7 +29,7 @@ export default function AutoResizeTextarea({
       onChange={(e) => onChange(e.target.value)}
       rows={rows}
       placeholder={placeholder}
-      className={className}
+      className={`w-full ${className}`}
       style={{ overflow: 'hidden', resize: 'none' }}
     />
   )

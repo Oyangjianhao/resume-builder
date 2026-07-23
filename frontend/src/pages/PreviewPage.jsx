@@ -1,16 +1,17 @@
 /**
- * 简历内容结果页（v0.2）
- * AI 生成的简历内容以卡片形式展示，支持：
+ * 简历内容结果页（v0.5 — Apple Luxury 主题）
+ * AI 生成的简历内容以纯白卡片形式展示，支持：
  * - 每个板块独立复制（格式化纯文本）
  * - 一键复制全文
  * - Bullet 勾选筛选
  * - 在线编辑（点击文字即可修改）
  * - match_reason 展示（每条 bullet 的 JD 匹配说明）
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useResumeStore from '../store/resumeStore'
 import AutoResizeTextarea from '../components/AutoResizeTextarea'
+import GradientGlow from '../components/GradientGlow'
 
 // ===== 复制按钮组件 =====
 function CopyButton({ text, label = '复制' }) {
@@ -22,7 +23,6 @@ function CopyButton({ text, label = '复制' }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // fallback
       const ta = document.createElement('textarea')
       ta.value = text
       document.body.appendChild(ta)
@@ -37,13 +37,13 @@ function CopyButton({ text, label = '复制' }) {
   return (
     <button
       onClick={handleCopy}
-      className={`text-xs px-2 py-1 rounded transition-colors ${
+      className={`text-xs px-3 py-1.5 rounded-lg border transition-all duration-200 ${
         copied
-          ? 'bg-green-100 text-green-700'
-          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+          ? 'bg-[#0071e3]/10 border-[#0071e3]/30 text-[#0071e3]'
+          : 'bg-white/60 border-[#e8e8ed] text-[#6e6e73] hover:bg-white hover:text-[#1d1d1f] hover:border-[#86868b]'
       }`}
     >
-      {copied ? '已复制 ✓' : label}
+      {copied ? '已复制' : label}
     </button>
   )
 }
@@ -53,44 +53,29 @@ function SectionCard({ title, children, copyText, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <div className="bg-white shadow-card border border-gray-200 rounded-lg mb-4 animate-fade-in-up">
-      <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+    <div className="glass-heavy rounded-xl border border-[#e8e8ed]/60 border-l-[3px] border-l-[#e8e8ed] mb-5 animate-fade-in-up overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3.5">
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-2 text-sm font-bold text-gray-700"
+          className="flex items-center gap-2.5 text-sm font-semibold text-[#1d1d1f] group"
         >
-          <svg className={`w-3 h-3 text-gray-400 transition-transform ${open ? '' : '-rotate-90'}`} viewBox="0 0 12 12" fill="none">
-            <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg
+            className={`w-3.5 h-3.5 text-[#86868b] transition-transform duration-200 group-hover:text-[#6e6e73] ${
+              open ? 'rotate-0' : '-rotate-90'
+            }`}
+            viewBox="0 0 12 12"
+            fill="none"
+          >
+            <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {title}
+          <span className="tracking-wide">{title}</span>
         </button>
         <div className="flex items-center gap-2">
           {copyText && open && <CopyButton text={copyText} />}
         </div>
       </div>
-      {open && <div className="px-5 py-4 overflow-visible">{children}</div>}
+      {open && <div className="px-5 pb-5">{children}</div>}
     </div>
-  )
-}
-
-// ===== 可编辑文本组件 =====
-function EditableText({ value, onChange, className = '', multiline = false }) {
-  if (multiline) {
-    return (
-      <AutoResizeTextarea
-        value={value}
-        onChange={onChange}
-        className={`w-full border-none outline-none bg-transparent focus:ring-1 focus:ring-primary-200 rounded px-1 ${className}`}
-      />
-    )
-  }
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`w-full border-none outline-none bg-transparent focus:ring-1 focus:ring-primary-200 rounded px-1 ${className}`}
-    />
   )
 }
 
@@ -101,25 +86,28 @@ export default function PreviewPage() {
   const resume = store.generatedResume
 
   const [editData, setEditData] = useState(null)
-  // bullet 勾选状态：{ "experience_0": [true, true, false], "project_experience_1": [true] }
   const [checkedBullets, setCheckedBullets] = useState({})
 
   useEffect(() => {
     if (resume) {
-      const cloned = JSON.parse(JSON.stringify(resume))
-      setEditData(cloned)
-      // 初始化全部勾选
-      const checks = {}
-      cloned.experience?.forEach((exp, i) => {
-        checks[`experience_${i}`] = exp.bullets?.map(() => true) || []
-      })
-      cloned.project_experience?.forEach((exp, i) => {
-        checks[`project_experience_${i}`] = exp.bullets?.map(() => true) || []
-      })
-      if (cloned.core_strengths?.length > 0) {
-        checks['core_strengths'] = cloned.core_strengths.map(() => true)
+      try {
+        const cloned = JSON.parse(JSON.stringify(resume))
+        setEditData(cloned)
+        const checks = {}
+        cloned.experience?.forEach((exp, i) => {
+          checks[`experience_${i}`] = exp.bullets?.map(() => true) || []
+        })
+        cloned.project_experience?.forEach((exp, i) => {
+          checks[`project_experience_${i}`] = exp.bullets?.map(() => true) || []
+        })
+        if (cloned.core_strengths?.length > 0) {
+          checks['core_strengths'] = cloned.core_strengths.map(() => true)
+        }
+        setCheckedBullets(checks)
+      } catch (err) {
+        console.error('PreviewPage: failed to parse resume data', err)
+        setEditData(null)
       }
-      setCheckedBullets(checks)
     }
   }, [resume])
 
@@ -146,7 +134,6 @@ export default function PreviewPage() {
     })
   }
 
-  // ===== 获取 bullet 文本（兼容旧格式） =====
   function getBulletText(bullet) {
     if (typeof bullet === 'string') return bullet
     return bullet?.text || ''
@@ -164,18 +151,27 @@ export default function PreviewPage() {
       case 'career_summary':
         return editData.career_summary || ''
 
-      case 'core_strengths':
-        return editData.core_strengths?.map((s) => `· ${s}`).join('\n') || ''
+      case 'core_strengths': {
+        const csChecks = checkedBullets['core_strengths'] || []
+        return (
+          editData.core_strengths
+            ?.filter((_, i) => csChecks[i] !== false)
+            .map((s) => `· ${s}`)
+            .join('\n') || ''
+        )
+      }
 
       case 'education':
-        return editData.education
-          ?.map((e) => {
-            let line = `${e.school} | ${e.major} | ${e.degree} | ${e.start_year}-${e.end_year}`
-            if (e.gpa) line += ` | GPA ${e.gpa}`
-            if (e.courses) line += `\n相关课程：${e.courses}`
-            return line
-          })
-          .join('\n\n') || ''
+        return (
+          editData.education
+            ?.map((e) => {
+              let line = `${e.school} | ${e.major} | ${e.degree} | ${e.start_year}-${e.end_year}`
+              if (e.gpa) line += ` | GPA ${e.gpa}`
+              if (e.courses) line += `\n相关课程：${e.courses}`
+              return line
+            })
+            .join('\n\n') || ''
+        )
 
       case 'experience':
       case 'project_experience': {
@@ -184,9 +180,10 @@ export default function PreviewPage() {
           .map((exp, i) => {
             const key = `${section}_${i}`
             const checks = checkedBullets[key] || []
-            const header = section === 'experience'
-              ? `${exp.company} | ${exp.role} | ${exp.start_date} - ${exp.end_date}`
-              : `${exp.name} | ${exp.start_date} - ${exp.end_date}`
+            const header =
+              section === 'experience'
+                ? `${exp.company} | ${exp.role} | ${exp.start_date} - ${exp.end_date}`
+                : `${exp.name} | ${exp.start_date} - ${exp.end_date}`
             const bullets = (exp.bullets || [])
               .filter((_, bi) => checks[bi] !== false)
               .map((b) => `· ${getBulletText(b)}`)
@@ -198,13 +195,9 @@ export default function PreviewPage() {
 
       case 'skills': {
         if (!editData.skills?.length) return ''
-        // 新格式（SkillGroup[]）
         if (editData.skills[0]?.category) {
-          return editData.skills
-            .map((g) => `【${g.category}】${g.items.join('、')}`)
-            .join('\n')
+          return editData.skills.map((g) => `【${g.category}】${g.items.join('、')}`).join('\n')
         }
-        // 旧格式（str[]）
         return editData.skills.join('、')
       }
 
@@ -258,12 +251,15 @@ export default function PreviewPage() {
     return sections.filter((s) => s && s.trim()).join('\n\n')
   }
 
-  // 如果还没生成过简历，跳回填写页
   if (!resume || !editData) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center">
-        <p className="text-gray-500 mb-4">还没有生成简历</p>
-        <button onClick={() => navigate('/form')} className="text-primary-600 hover:underline">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#fbfbfd]">
+        <GradientGlow />
+        <p className="text-[#86868b] mb-4 relative z-10">还没有生成简历</p>
+        <button
+          onClick={() => navigate('/form')}
+          className="relative z-10 px-5 py-2.5 rounded-full bg-[#0071e3] text-white text-sm font-medium hover:bg-[#0077ed] transition-colors duration-200"
+        >
           返回填写
         </button>
       </div>
@@ -273,14 +269,22 @@ export default function PreviewPage() {
   const hasJD = editData.jd_analysis?.key_requirements?.length > 0
 
   return (
-    <div className="min-h-screen bg-surface py-8">
+    <div className="min-h-screen relative flex flex-col items-center bg-[#fbfbfd]">
+      <GradientGlow />
+
       {/* 顶部操作栏 */}
-      <div className="max-w-3xl mx-auto mb-6 px-4">
+      <div className="relative z-10 w-full max-w-5xl pt-8 mb-6 px-4">
         <div className="flex justify-between items-center mb-3">
-          <button onClick={() => navigate('/form')} className="text-gray-500 hover:text-gray-700 text-sm">
-            ← 返回修改
+          <button
+            onClick={() => navigate('/form')}
+            className="text-[#86868b] hover:text-[#1d1d1f] text-sm transition-colors flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5m7-7l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            返回修改
           </button>
-          <h2 className="text-xl font-bold text-slate-800">简历内容</h2>
+          <h2 className="text-xl font-bold text-[#1d1d1f]">简历内容</h2>
           <div className="flex gap-2">
             <CopyButton text={formatFullResume()} label="复制全部" />
             <button
@@ -289,46 +293,70 @@ export default function PreviewPage() {
                 store.setInterviewPrep(null)
                 navigate('/')
               }}
-              className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-500 hover:bg-gray-200"
+              className="text-xs px-3 py-1.5 rounded-lg bg-white/60 border border-[#e8e8ed] text-[#86868b] hover:text-[#6e6e73] hover:border-[#86868b] transition-all"
             >
               再做一份
             </button>
           </div>
         </div>
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-[#86868b]">
           点击任意文字可直接编辑 · 勾选/取消 bullet 控制复制内容 · 每个板块可独立复制
         </p>
         {editData.token_usage?.total_tokens > 0 && (
-          <p className="text-xs text-gray-400 mt-1">
-            AI 消耗：{editData.token_usage.total_tokens} tokens
-          </p>
+          <p className="text-xs text-[#86868b] mt-1">AI 消耗：{editData.token_usage.total_tokens} tokens</p>
         )}
       </div>
 
-      <div className="max-w-3xl mx-auto px-4">
+      <div className="relative z-10 w-full max-w-5xl px-4 pb-16">
         {/* 引导提示 */}
-        <div className="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3 mb-6 text-sm text-primary-700">
-          内容已生成完毕。你可以直接编辑修改，然后点击"复制"按钮将内容粘贴到 WPS、超级简历等工具的模板中。
+        <div className="glass rounded-xl border border-[#e8e8ed] px-5 py-3 mb-6 text-sm text-[#6e6e73]">
+          <div className="flex items-start gap-2.5">
+            <svg className="w-4 h-4 mt-0.5 shrink-0 text-[#86868b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4m0-4h.01" strokeLinecap="round" />
+            </svg>
+            <span>内容已生成完毕。你可以直接编辑修改，然后点击"复制"按钮将内容粘贴到 WPS、超级简历等工具的模板中。</span>
+          </div>
         </div>
 
         {/* === 基本信息 === */}
         <SectionCard title="基本信息" copyText={formatSection('basic')}>
-          <div className="space-y-2">
-            <div className="flex gap-2 items-center">
-              <span className="text-gray-400 text-sm w-16 shrink-0">姓名</span>
-              <EditableText value={editData.name} onChange={(v) => updateField('name', v)} className="text-base font-bold" />
+          <div className="space-y-3">
+            <div className="flex gap-3 items-center">
+              <span className="text-[#86868b] text-sm w-16 shrink-0">姓名</span>
+              <input
+                type="text"
+                value={editData.name}
+                onChange={(e) => updateField('name', e.target.value)}
+                className="text-base font-bold text-[#1d1d1f] bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
+              />
             </div>
-            <div className="flex gap-2 items-center">
-              <span className="text-gray-400 text-sm w-16 shrink-0">手机</span>
-              <EditableText value={editData.phone} onChange={(v) => updateField('phone', v)} className="text-sm" />
+            <div className="flex gap-3 items-center">
+              <span className="text-[#86868b] text-sm w-16 shrink-0">手机</span>
+              <input
+                type="text"
+                value={editData.phone}
+                onChange={(e) => updateField('phone', e.target.value)}
+                className="text-sm text-[#6e6e73] bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
+              />
             </div>
-            <div className="flex gap-2 items-center">
-              <span className="text-gray-400 text-sm w-16 shrink-0">邮箱</span>
-              <EditableText value={editData.email} onChange={(v) => updateField('email', v)} className="text-sm" />
+            <div className="flex gap-3 items-center">
+              <span className="text-[#86868b] text-sm w-16 shrink-0">邮箱</span>
+              <input
+                type="text"
+                value={editData.email}
+                onChange={(e) => updateField('email', e.target.value)}
+                className="text-sm text-[#6e6e73] bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
+              />
             </div>
-            <div className="flex gap-2 items-center">
-              <span className="text-gray-400 text-sm w-16 shrink-0">目标岗位</span>
-              <EditableText value={editData.target_position} onChange={(v) => updateField('target_position', v)} className="text-sm" />
+            <div className="flex gap-3 items-center">
+              <span className="text-[#86868b] text-sm w-16 shrink-0">目标岗位</span>
+              <input
+                type="text"
+                value={editData.target_position}
+                onChange={(e) => updateField('target_position', e.target.value)}
+                className="text-sm text-[#6e6e73] bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
+              />
             </div>
           </div>
         </SectionCard>
@@ -336,10 +364,10 @@ export default function PreviewPage() {
         {/* === 求职意向 === */}
         {editData.job_objective && (
           <SectionCard title="求职意向" copyText={formatSection('objective')}>
-            <EditableText
+            <AutoResizeTextarea
               value={editData.job_objective}
               onChange={(v) => updateField('job_objective', v)}
-              className="text-sm text-gray-700"
+              className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
             />
           </SectionCard>
         )}
@@ -350,7 +378,7 @@ export default function PreviewPage() {
             <AutoResizeTextarea
               value={editData.career_summary}
               onChange={(v) => updateField('career_summary', v)}
-              className="text-sm text-gray-700 leading-relaxed"
+              className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
             />
           </SectionCard>
         )}
@@ -358,11 +386,11 @@ export default function PreviewPage() {
         {/* === 核心优势 === */}
         {editData.core_strengths?.length > 0 && (
           <SectionCard title="核心优势" copyText={formatSection('core_strengths')}>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {editData.core_strengths.map((s, i) => {
                 const csChecks = checkedBullets['core_strengths'] || []
                 return (
-                  <div key={i} className="flex gap-2 items-start">
+                  <div key={i} className="flex gap-2.5 items-start group">
                     <input
                       type="checkbox"
                       checked={csChecks[i] !== false}
@@ -374,13 +402,13 @@ export default function PreviewPage() {
                         newChecks['core_strengths'][i] = e.target.checked
                         setCheckedBullets(newChecks)
                       }}
-                      className="mt-1.5 shrink-0 accent-primary-500"
+                      className="mt-1.5 shrink-0 w-4 h-4 rounded border-[#e8e8ed] bg-white focus:ring-[#0071e3]/20 focus:ring-offset-0"
                     />
-                    <div className={`flex-1 ${csChecks[i] === false ? 'opacity-30' : ''}`}>
+                    <div className={`flex-1 transition-opacity duration-200 ${csChecks[i] === false ? 'opacity-25' : ''}`}>
                       <AutoResizeTextarea
                         value={s}
                         onChange={(v) => updateField(`core_strengths.${i}`, v)}
-                        className="text-sm text-gray-700"
+                        className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
                       />
                     </div>
                   </div>
@@ -394,16 +422,16 @@ export default function PreviewPage() {
         {editData.education?.length > 0 && (
           <SectionCard title="教育经历" copyText={formatSection('education')}>
             {editData.education.map((e, i) => (
-              <div key={i} className={i > 0 ? 'mt-4 pt-4 border-t border-gray-100' : ''}>
+              <div key={i} className={i > 0 ? 'mt-4 pt-4 border-t border-[#e8e8ed]' : ''}>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  <span className="font-bold text-slate-800">{e.school}</span>
-                  <span className="text-gray-600">{e.major} · {e.degree}</span>
-                  <span className="text-gray-400">{e.start_year}-{e.end_year}</span>
-                  {e.gpa && <span className="text-gray-500">GPA {e.gpa}</span>}
+                  <span className="font-bold text-[#1d1d1f]">{e.school}</span>
+                  <span className="text-[#6e6e73]">
+                    {e.major} · {e.degree}
+                  </span>
+                  <span className="text-[#86868b]">{e.start_year}-{e.end_year}</span>
+                  {e.gpa && <span className="text-[#6e6e73]">GPA {e.gpa}</span>}
                 </div>
-                {e.courses && (
-                  <p className="text-xs text-gray-500 mt-1">相关课程：{e.courses}</p>
-                )}
+                {e.courses && <p className="text-xs text-[#86868b] mt-1.5">相关课程：{e.courses}</p>}
               </div>
             ))}
           </SectionCard>
@@ -416,33 +444,38 @@ export default function PreviewPage() {
               const key = `experience_${ei}`
               const checks = checkedBullets[key] || []
               return (
-                <div key={ei} className={ei > 0 ? 'mt-6 pt-6 border-t border-gray-100' : ''}>
+                <div key={ei} className={ei > 0 ? 'mt-6 pt-6 border-t border-[#e8e8ed]' : ''}>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
-                    <span className="font-bold text-slate-800">{exp.company}</span>
-                    <span className="text-gray-600">{exp.role}</span>
-                    <span className="text-gray-400 text-sm">{exp.start_date} - {exp.end_date}</span>
+                    <span className="font-bold text-[#1d1d1f]">{exp.company}</span>
+                    <span className="text-[#6e6e73]">{exp.role}</span>
+                    <span className="text-[#86868b] text-sm">{exp.start_date} - {exp.end_date}</span>
                   </div>
                   {exp.jd_match?.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-2">
+                    <div className="flex flex-wrap gap-1.5 mb-3">
                       {exp.jd_match.map((m, mi) => (
-                        <span key={mi} className="text-xs bg-primary-50 text-primary-600 px-1.5 py-0.5 rounded">{m}</span>
+                        <span
+                          key={mi}
+                          className="text-xs bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed] px-2 py-0.5 rounded-full"
+                        >
+                          {m}
+                        </span>
                       ))}
                     </div>
                   )}
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {exp.bullets?.map((bullet, bi) => {
                       const text = getBulletText(bullet)
                       const reason = typeof bullet === 'object' ? bullet.match_reason : ''
                       const score = typeof bullet === 'object' ? bullet.match_score : ''
                       return (
-                        <div key={bi} className="flex gap-2 items-start">
+                        <div key={bi} className="flex gap-2.5 items-start group">
                           <input
                             type="checkbox"
                             checked={checks[bi] !== false}
                             onChange={() => toggleBullet('experience', ei, bi)}
-                            className="mt-1.5 shrink-0 accent-primary-500"
+                            className="mt-1.5 shrink-0 w-4 h-4 rounded border-[#e8e8ed] bg-white focus:ring-[#0071e3]/20 focus:ring-offset-0"
                           />
-                          <div className={`flex-1 ${checks[bi] === false ? 'opacity-30' : ''}`}>
+                          <div className={`flex-1 transition-opacity duration-200 ${checks[bi] === false ? 'opacity-25' : ''}`}>
                             <AutoResizeTextarea
                               value={text}
                               onChange={(v) => {
@@ -454,16 +487,22 @@ export default function PreviewPage() {
                                 }
                                 syncToStore(newData)
                               }}
-                              className="text-sm text-gray-700 leading-relaxed"
+                              className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
                             />
                             {reason && (
-                              <p className="text-xs text-gray-400 mt-0.5">
+                              <p className="text-xs text-[#86868b] mt-1">
                                 {score && (
-                                  <span className={`inline-block mr-1 px-1 rounded text-xs ${
-                                    score === 'high' ? 'bg-primary-50 text-primary-700' :
-                                    score === 'low' ? 'bg-gray-100 text-gray-500' :
-                                    'bg-accent-50 text-accent-600'
-                                  }`}>{score === 'high' ? '高' : score === 'low' ? '低' : '中'}</span>
+                                  <span
+                                    className={`inline-block mr-1.5 px-1.5 py-0.5 rounded text-xs font-medium ${
+                                      score === 'high'
+                                        ? 'bg-[#0071e3]/10 text-[#0071e3] border border-[#0071e3]/20'
+                                        : score === 'low'
+                                        ? 'bg-[#f5f5f7] text-[#86868b] border border-[#e8e8ed]'
+                                        : 'bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed]'
+                                    }`}
+                                  >
+                                    {score === 'high' ? '高匹配' : score === 'low' ? '低匹配' : '中匹配'}
+                                  </span>
                                 )}
                                 {reason}
                               </p>
@@ -486,32 +525,37 @@ export default function PreviewPage() {
               const key = `project_experience_${ei}`
               const checks = checkedBullets[key] || []
               return (
-                <div key={ei} className={ei > 0 ? 'mt-6 pt-6 border-t border-gray-100' : ''}>
+                <div key={ei} className={ei > 0 ? 'mt-6 pt-6 border-t border-[#e8e8ed]' : ''}>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
-                    <span className="font-bold text-slate-800">{exp.name}</span>
-                    <span className="text-gray-400 text-sm">{exp.start_date} - {exp.end_date}</span>
+                    <span className="font-bold text-[#1d1d1f]">{exp.name}</span>
+                    <span className="text-[#86868b] text-sm">{exp.start_date} - {exp.end_date}</span>
                   </div>
                   {exp.jd_match?.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-2">
+                    <div className="flex flex-wrap gap-1.5 mb-3">
                       {exp.jd_match.map((m, mi) => (
-                        <span key={mi} className="text-xs bg-primary-50 text-primary-600 px-1.5 py-0.5 rounded">{m}</span>
+                        <span
+                          key={mi}
+                          className="text-xs bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed] px-2 py-0.5 rounded-full"
+                        >
+                          {m}
+                        </span>
                       ))}
                     </div>
                   )}
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {exp.bullets?.map((bullet, bi) => {
                       const text = getBulletText(bullet)
                       const reason = typeof bullet === 'object' ? bullet.match_reason : ''
                       const score = typeof bullet === 'object' ? bullet.match_score : ''
                       return (
-                        <div key={bi} className="flex gap-2 items-start">
+                        <div key={bi} className="flex gap-2.5 items-start group">
                           <input
                             type="checkbox"
                             checked={checks[bi] !== false}
                             onChange={() => toggleBullet('project_experience', ei, bi)}
-                            className="mt-1.5 shrink-0 accent-primary-500"
+                            className="mt-1.5 shrink-0 w-4 h-4 rounded border-[#e8e8ed] bg-white focus:ring-[#0071e3]/20 focus:ring-offset-0"
                           />
-                          <div className={`flex-1 ${checks[bi] === false ? 'opacity-30' : ''}`}>
+                          <div className={`flex-1 transition-opacity duration-200 ${checks[bi] === false ? 'opacity-25' : ''}`}>
                             <AutoResizeTextarea
                               value={text}
                               onChange={(v) => {
@@ -523,16 +567,22 @@ export default function PreviewPage() {
                                 }
                                 syncToStore(newData)
                               }}
-                              className="text-sm text-gray-700 leading-relaxed"
+                              className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
                             />
                             {reason && (
-                              <p className="text-xs text-gray-400 mt-0.5">
+                              <p className="text-xs text-[#86868b] mt-1">
                                 {score && (
-                                  <span className={`inline-block mr-1 px-1 rounded text-xs ${
-                                    score === 'high' ? 'bg-primary-50 text-primary-700' :
-                                    score === 'low' ? 'bg-gray-100 text-gray-500' :
-                                    'bg-accent-50 text-accent-600'
-                                  }`}>{score === 'high' ? '高' : score === 'low' ? '低' : '中'}</span>
+                                  <span
+                                    className={`inline-block mr-1.5 px-1.5 py-0.5 rounded text-xs font-medium ${
+                                      score === 'high'
+                                        ? 'bg-[#0071e3]/10 text-[#0071e3] border border-[#0071e3]/20'
+                                        : score === 'low'
+                                        ? 'bg-[#f5f5f7] text-[#86868b] border border-[#e8e8ed]'
+                                        : 'bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed]'
+                                    }`}
+                                  >
+                                    {score === 'high' ? '高匹配' : score === 'low' ? '低匹配' : '中匹配'}
+                                  </span>
                                 )}
                                 {reason}
                               </p>
@@ -551,31 +601,19 @@ export default function PreviewPage() {
         {/* === 技能 === */}
         {editData.skills?.length > 0 && (
           <SectionCard title="技能" copyText={formatSection('skills')}>
-            {/* 新格式：分类展示 */}
             {editData.skills[0]?.category ? (
               <div className="space-y-3">
-                {editData.skills.map((group, gi) => (
-                  <div key={gi}>
-                    <p className="text-xs font-bold text-gray-500 mb-1">{group.category}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {group.items.map((item, ii) => (
-                        <span key={ii} className="text-sm bg-gray-50 border border-gray-200 text-gray-700 px-2 py-0.5 rounded">
-                          {item}
-                        </span>
-                      ))}
-                    </div>
+                {editData.skills.map((g, gi) => (
+                  <div key={gi} className="flex gap-3">
+                    <span className="text-xs font-medium text-[#6e6e73] bg-[#f5f5f7] border border-[#e8e8ed] px-2 py-1 rounded shrink-0 min-w-[60px] text-center">
+                      {g.category}
+                    </span>
+                    <span className="text-sm text-[#6e6e73]">{g.items.join('、')}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              /* 旧格式：扁平列表 */
-              <div className="flex flex-wrap gap-1.5">
-                {editData.skills.map((s, i) => (
-                  <span key={i} className="text-sm bg-gray-50 border border-gray-200 text-gray-700 px-2 py-0.5 rounded">
-                    {s}
-                  </span>
-                ))}
-              </div>
+              <p className="text-sm text-[#6e6e73]">{editData.skills.join('、')}</p>
             )}
           </SectionCard>
         )}
@@ -583,11 +621,14 @@ export default function PreviewPage() {
         {/* === 证书 === */}
         {editData.certificates?.length > 0 && (
           <SectionCard title="证书" copyText={formatSection('certificates')}>
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-1.5">
               {editData.certificates.map((c, i) => (
-                <span key={i} className="text-sm bg-gray-50 border border-gray-200 text-gray-700 px-2 py-1 rounded">
+                <p key={i} className="text-sm text-[#6e6e73] flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5 text-[#86868b] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 15l-2 5 2-1 2 1-2-5zm0 0V8m-4 0a4 4 0 118 0H8z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                   {c}
-                </span>
+                </p>
               ))}
             </div>
           </SectionCard>
@@ -599,155 +640,95 @@ export default function PreviewPage() {
             <AutoResizeTextarea
               value={editData.self_evaluation}
               onChange={(v) => updateField('self_evaluation', v)}
-              className="text-sm text-gray-700 leading-relaxed"
+              className="text-sm text-[#6e6e73] leading-relaxed bg-[#f5f5f7] border border-transparent rounded-lg px-2 py-1 outline-none focus:border-[#0071e3] focus:bg-white focus:shadow-sm transition-all"
             />
           </SectionCard>
         )}
 
-        {/* === 面试话术 === */}
+        {/* === 面试准备（话术） === */}
         {editData.interview_tips?.length > 0 && (
-          <SectionCard title="面试话术 / 准备建议" copyText={formatSection('interview_tips')} defaultOpen={true}>
-            {editData.interview_tips.map((tip, ti) => (
-              <div key={ti} className={ti > 0 ? 'mt-5 pt-5 border-t border-gray-100' : ''}>
-                <p className="text-sm font-bold text-gray-700 mb-2">{tip.experience_name}</p>
-                {tip.questions?.map((q, qi) => (
-                  <div key={qi} className="mb-3 pl-3 border-l-2 border-primary-200">
-                    <p className="text-sm text-slate-800">Q: {q.question}</p>
-                    <p className="text-sm text-gray-500 mt-1">回答思路：{q.answer_hint}</p>
-                  </div>
-                ))}
-              </div>
-            ))}
+          <SectionCard title="面试准备（话术建议）" copyText={formatSection('interview_tips')}>
+            <div className="space-y-5">
+              {editData.interview_tips.map((tip, ti) => (
+                <div key={ti}>
+                  <h4 className="text-sm font-bold text-[#1d1d1f] mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-[#86868b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="2" y="3" width="20" height="14" rx="2" />
+                      <path d="M8 21h8m-4-4v4" strokeLinecap="round" />
+                    </svg>
+                    {tip.experience_name}
+                  </h4>
+                  {tip.questions?.map((q, qi) => (
+                    <div key={qi} className="glass mb-3 rounded-lg p-4">
+                      <p className="text-sm text-[#1d1d1f] font-medium mb-1.5">
+                        Q{qi + 1}: {q.question}
+                      </p>
+                      <p className="text-xs text-[#86868b] leading-relaxed">回答思路：{q.answer_hint}</p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           </SectionCard>
         )}
 
         {/* === JD 匹配分析 === */}
         {hasJD && (
-          <SectionCard title="JD 匹配分析" defaultOpen={true}>
-            {/* 匹配度评分 */}
-            {editData.jd_analysis.match_score && (
-              <div className="mb-4 p-3 bg-gradient-to-r from-primary-50 to-primary-100 rounded-lg border border-primary-200">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500">综合匹配度</span>
-                  <span className="text-2xl font-bold text-primary-600">
-                    {editData.jd_analysis.match_score}
-                  </span>
+          <SectionCard title="JD 匹配分析">
+            <div className="space-y-4">
+              <div className="flex items-end gap-3">
+                <span className="text-3xl font-bold text-[#0071e3]">
+                  {editData.jd_analysis?.match_score || '—'}
+                </span>
+                <span className="text-sm text-[#86868b]">整体匹配度</span>
+              </div>
+              {editData.jd_analysis?.key_requirements?.length > 0 && (
+                <div>
+                  <p className="text-xs text-[#86868b] mb-2 uppercase tracking-wider">关键要求</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {editData.jd_analysis.key_requirements.map((r, i) => (
+                      <span
+                        key={i}
+                        className="text-xs bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed] px-2 py-0.5 rounded-full"
+                      >
+                        {r}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-            {editData.jd_analysis.key_requirements?.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 font-medium mb-2">JD 关键要求</p>
-                <div className="flex flex-wrap gap-2">
-                  {editData.jd_analysis.key_requirements.map((req, i) => (
-                    <span key={i} className="bg-primary-50 text-primary-600 text-xs px-2 py-1 rounded">{req}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {editData.jd_analysis.matched_projects?.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 font-medium mb-2">匹配的项目</p>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  {editData.jd_analysis.matched_projects.map((proj, i) => (
-                    <li key={i}>· {proj}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {editData.jd_analysis.gaps?.length > 0 && (
-              <div>
-                <p className="text-xs text-gray-400 font-medium mb-2">待弥补的差距</p>
-                <ul className="space-y-2">
-                  {editData.jd_analysis.gaps.map((item, i) => {
-                    // 兼容旧格式（纯字符串）和新格式（{gap, suggestion}）
-                    const gapText = typeof item === 'string' ? item : item.gap
-                    const suggestion = typeof item === 'string' ? null : item.suggestion
-                    return (
-                      <li key={i} className="text-sm">
-                        <span className="text-orange-600">· {gapText}</span>
-                        {suggestion && (
-                          <p className="text-xs text-gray-400 mt-0.5 ml-3 pl-2 border-l-2 border-orange-200">
-                            {suggestion}
-                          </p>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            )}
+              )}
+            </div>
           </SectionCard>
         )}
 
-        {/* === 项目深度分析的面试准备（如果有） === */}
-        {store.interviewPrep?.interview_prep && (
-          <SectionCard title="项目深度分析 - 面试准备" defaultOpen={true}>
-            {/* 项目-JD 关联度评估 */}
-            {store.interviewPrep.jd_project_relevance && (
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs text-gray-500">项目-JD 关联度：</span>
-                  <span className={`inline-block text-xs font-medium rounded px-2 py-0.5 ${
-                    store.interviewPrep.jd_project_relevance === 'high' ? 'bg-green-100 text-green-700' :
-                    store.interviewPrep.jd_project_relevance === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-orange-100 text-orange-700'
-                  }`}>
-                    {store.interviewPrep.jd_project_relevance === 'high' ? '高' :
-                     store.interviewPrep.jd_project_relevance === 'partial' ? '部分' : '低'}
-                  </span>
-                </div>
-                {store.interviewPrep.relevance_reason && (
-                  <p className="text-xs text-gray-500">{store.interviewPrep.relevance_reason}</p>
-                )}
-              </div>
-            )}
-            {/* JD 核心维度（JD 模式下才有） */}
-            {store.interviewPrep.jd_dimensions?.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 font-medium mb-2">JD 核心维度</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {store.interviewPrep.jd_dimensions.map((dim, i) => (
-                    <span key={i} className="inline-block text-xs bg-primary-50 text-primary-700 border border-primary-200 rounded px-2 py-0.5">{dim}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {store.interviewPrep.interview_prep.key_technologies?.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 font-medium mb-2">需要掌握的核心技术</p>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  {store.interviewPrep.interview_prep.key_technologies.map((tech, i) => (
-                    <li key={i}>· {tech}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {store.interviewPrep.interview_prep.likely_questions?.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-gray-400 font-medium mb-2">可能被问到的问题</p>
-                {store.interviewPrep.interview_prep.likely_questions.map((q, i) => (
-                  <div key={i} className="mb-3 pl-3 border-l-2 border-primary-200">
-                    <div className="flex flex-wrap gap-1 mb-1">
-                      {q.jd_requirement && (
-                        <span className="inline-block text-xs bg-primary-100 text-primary-800 rounded px-1.5 py-0.5">JD: {q.jd_requirement}</span>
-                      )}
-                      {q.question_type && (
-                        <span className="inline-block text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{q.question_type}</span>
-                      )}
-                    </div>
-                    <p className="text-sm text-slate-800">Q: {q.question}</p>
-                    <p className="text-sm text-gray-500 mt-1">提示：{q.hint}</p>
+        {/* === 项目深度分析（面试准备） === */}
+        {store.interviewPrep && (
+          <SectionCard title="项目深度分析（面试准备清单）">
+            <div className="space-y-3">
+              {store.interviewPrep.tech_stack?.length > 0 && (
+                <div>
+                  <p className="text-xs text-[#86868b] mb-2 uppercase tracking-wider">技术栈</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {store.interviewPrep.tech_stack.map((t, i) => (
+                      <span
+                        key={i}
+                        className="text-xs bg-[#f5f5f7] text-[#6e6e73] border border-[#e8e8ed] px-2 py-0.5 rounded-full"
+                      >
+                        {t}
+                      </span>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-            {store.interviewPrep.interview_prep.study_tips && (
-              <div>
-                <p className="text-xs text-gray-400 font-medium mb-1">学习建议</p>
-                <p className="text-sm text-gray-600">{store.interviewPrep.interview_prep.study_tips}</p>
-              </div>
-            )}
+                </div>
+              )}
+              {store.interviewPrep.interview_prep?.likely_questions?.map((prep, pi) => (
+                <div key={pi} className="glass rounded-lg p-4">
+                  <p className="text-sm text-[#1d1d1f] font-medium mb-1.5">
+                    Q{pi + 1}: {prep.question}
+                  </p>
+                  <p className="text-xs text-[#86868b] leading-relaxed">回答思路：{prep.hint}</p>
+                </div>
+              ))}
+            </div>
           </SectionCard>
         )}
       </div>

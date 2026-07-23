@@ -14,6 +14,7 @@ const useResumeStore = create(
     currentStep: 1,
     nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 5) })),
     prevStep: () => set((s) => ({ currentStep: Math.max(s.currentStep - 1, 1) })),
+    setCurrentStep: (step) => set({ currentStep: Math.max(1, Math.min(5, step)) }),
 
     // ===== 第 1 步：基本信息 =====
     personal: {
@@ -131,7 +132,7 @@ const useResumeStore = create(
       interviewPrep: null,
     }),
   }),
-    { name: 'resume-storage', version: 1 }
+    { name: 'resume-storage', version: 2 }
   )
 )
 

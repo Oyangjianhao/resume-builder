@@ -1,38 +1,82 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ===== Apple 轻奢基础 ===== */
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  background: #f8f7f4;
-  color: #1e293b;
+  background: #fbfbfd;
+  color: #1d1d1f;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* ===== 渐变光晕背景层（替代 Canvas 粒子） ===== */
+#gradient-glow-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
 }
 
 /* ===== 占位符颜色统一 ===== */
 input::placeholder,
 textarea::placeholder {
-  color: #9ca3af;
+  color: #86868b;
 }
 
-/* ===== 自定义滚动条 ===== */
+/* ===== Apple 极细滚动条 ===== */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c7d2fe;
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a5b4fc;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* ===== 卡片通用类（Apple 风格纯白 + 极 subtle 阴影） ===== */
+@layer components {
+  .glass {
+    background: #ffffff;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.04);
+    border: none;
+  }
+
+  .glass-light {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .glass-heavy {
+    background: #ffffff;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.06);
+    border: none;
+  }
+
+  .glass-hover {
+    transition: all 0.25s ease;
+  }
+  .glass-hover:hover {
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+    border-color: transparent;
+  }
 }
 
 /* ===== 动画关键帧 ===== */
@@ -50,17 +94,6 @@ textarea::placeholder {
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-@keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
 }
 
 @keyframes slide-down {
@@ -86,16 +119,20 @@ textarea::placeholder {
 }
 
 @keyframes pop-in {
-  0% { transform: scale(0.8); opacity: 0; }
-  70% { transform: scale(1.05); }
+  0% { transform: scale(0.9); opacity: 0; }
+  60% { transform: scale(1.02); }
   100% { transform: scale(1); opacity: 1; }
 }
 
-@keyframes ripple {
-  to {
-    transform: scale(4);
-    opacity: 0;
-  }
+@keyframes typing-cursor {
+  0%, 100% { border-right-color: rgba(0, 113, 227, 0.7); }
+  50% { border-right-color: transparent; }
+}
+
+@keyframes float-orb {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.04; }
+  33% { transform: translate(8px, -10px) scale(1.08); opacity: 0.08; }
+  66% { transform: translate(-6px, 6px) scale(0.94); opacity: 0.03; }
 }
 
 /* ===== 工具类 ===== */
@@ -104,27 +141,96 @@ textarea::placeholder {
 }
 
 .animate-fade-in {
-  animation: fade-in 0.3s ease-out forwards;
+  animation: fade-in 0.35s ease-out forwards;
 }
 
 .animate-slide-down {
-  animation: slide-down 0.3s ease-out forwards;
+  animation: slide-down 0.35s ease-out forwards;
 }
 
 .animate-slide-up {
-  animation: slide-up 0.3s ease-out forwards;
+  animation: slide-up 0.25s ease-out forwards;
 }
 
 .animate-pop-in {
-  animation: pop-in 0.3s ease-out forwards;
+  animation: pop-in 0.35s cubic-bezier(0.34, 1.3, 0.64, 1) forwards;
 }
 
-.animate-pulse-ring {
-  animation: pulse-ring 2s ease-out infinite;
+.animate-typing-cursor {
+  border-right: 2px solid rgba(0, 113, 227, 0.7);
+  animation: typing-cursor 0.8s ease-in-out infinite;
 }
 
-.shimmer-bg {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* 渐变文字 — Apple 灰色系 */
+.text-gradient {
+  background: linear-gradient(135deg, #1d1d1f 0%, #333336 50%, #1d1d1f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 渐变文字 — 彩色（少量场景保留） */
+.text-gradient-color {
+  background: linear-gradient(135deg, #0071e3 0%, #2997ff 50%, #0071e3 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== 输入框全局样式 ===== */
+input[type="text"],
+input[type="month"],
+input[type="date"],
+input[type="email"],
+input[type="tel"],
+textarea,
+select {
+  background: #ffffff !important;
+  border: 1px solid #e8e8ed !important;
+  color: #1d1d1f !important;
+  outline: none !important;
+  transition: all 0.2s ease !important;
+  color-scheme: light;
+}
+input[type="text"]:focus,
+input[type="month"]:focus,
+input[type="date"]:focus,
+input[type="email"]:focus,
+input[type="tel"]:focus,
+textarea:focus,
+select:focus {
+  border-color: #0071e3 !important;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12) !important;
+}
+input[type="text"]::placeholder,
+input[type="month"]::placeholder,
+input[type="date"]::placeholder,
+input[type="email"]::placeholder,
+input[type="tel"]::placeholder,
+textarea::placeholder,
+select::placeholder {
+  color: #86868b !important;
+}
+
+/* 日期/月份选择器日历图标 */
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.25);
+  cursor: pointer;
+  opacity: 1;
+}
+
+/* checkbox */
+input[type="checkbox"] {
+  accent-color: #0071e3;
+}
+
+/* 选择文字颜色 */
+::selection {
+  background: rgba(0, 113, 227, 0.15);
+  color: #1d1d1f;
 }

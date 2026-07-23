@@ -25,3 +25,13 @@ Thumbs.db
 
 # Python
 *.egg-info/
+
+# Test & debug files
+debug_log.txt
+test_*.py
+test_*.json
+test_*.jsonl
+kill_port.ps1
+
+# Old components (superseded)
+ParticleBackground.jsx

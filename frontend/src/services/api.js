@@ -5,7 +5,7 @@
  * 这个文件封装了前端调后端的所有网络请求。
  */
 
-const API_BASE = 'http://127.0.0.1:59105'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:59105'
 
 /**
  * 调用后端生成简历
