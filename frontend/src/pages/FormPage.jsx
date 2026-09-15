@@ -5,7 +5,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useResumeStore from '../store/resumeStore'
-import { generateResume, analyzeProject } from '../services/api'
+import { generateResume, startAnalysis, getAnalysisStatus } from '../services/api'
 import GradientGlow from '../components/GradientGlow'
 
 const STEPS = ['基本信息', '目标岗位', '教育经历', '经历', '技能证书']
@@ -117,9 +117,18 @@ export default function FormPage() {
   const [jdTab, setJdTab] = useState('manual') // 'manual' | 'jd'
   const [analyzing, setAnalyzing] = useState(-1) // 正在分析的项目经历 index，-1 表示无
   const [analysisResult, setAnalysisResult] = useState({}) // 各项目经历的分析结果
+  const [analyzeProgress, setAnalyzeProgress] = useState('') // 当前分析阶段文字
   const [toastVisible, setToastVisible] = useState(false)
   const fileInputRef = useRef(null)
   const analyzingIndexRef = useRef(-1) // 当前正在上传的项目索引
+
+  // 进度阶段 → 中文展示
+  const PROGRESS_LABELS = {
+    'parsing': '正在解析上传的文件…',
+    'phase1+2': '正在分析项目结构与核心代码…',
+    'phase3a': '正在生成简历要点…',
+    'phase3b': '正在准备面试问题清单…',
+  }
 
   // ===== 项目文件分析 =====
   async function handleAnalyze(index) {
@@ -133,41 +142,107 @@ export default function FormPage() {
 
     const index = analyzingIndexRef.current
     setAnalyzing(index)
+    setAnalyzeProgress('正在上传文件…')
 
     try {
-      const result = await analyzeProject(file, '', store.targetPosition, store.jobDescription)
-      // 将分析结果的 bullets 填入项目描述
-      const project = store.projectExperience[index]
-      if (project && result.bullets?.length > 0) {
-        const newList = [...store.projectExperience]
-        newList[index] = {
-          ...project,
-          description: project.description
-            ? project.description + '\n\n[AI 分析]\n' + result.bullets.join('\n')
-            : '[AI 分析]\n' + result.bullets.join('\n'),
+      // 1. 启动异步分析任务（秒级返回 task_id）
+      const { task_id } = await startAnalysis(file, '', store.targetPosition, store.jobDescription)
+      setAnalyzeProgress('分析已启动，正在等待 AI 处理…')
+
+      // 2. 轮询直到完成
+      const POLL_INTERVAL = 2000
+      while (true) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+        const status = await getAnalysisStatus(task_id)
+
+        // 更新进度文字
+        const label = PROGRESS_LABELS[status.progress]
+        if (label) {
+          setAnalyzeProgress(label)
         }
-        store.setProjectExperience(newList)
-      }
-      // 保存完整分析结果（面试准备清单等）
-      setAnalysisResult((prev) => ({ ...prev, [index]: result }))
-      // 存储到 store 的面试准备清单（取最新的一个）
-      if (result.interview_prep) {
-        store.setInterviewPrep(result)
+
+        if (status.status === 'done') {
+          const result = status.result
+          // 将分析结果的 bullets 填入项目描述
+          const project = store.projectExperience[index]
+          if (project && result.bullets?.length > 0) {
+            const newList = [...store.projectExperience]
+            newList[index] = {
+              ...project,
+              description: project.description
+                ? project.description + '\n\n[AI 分析]\n' + result.bullets.join('\n')
+                : '[AI 分析]\n' + result.bullets.join('\n'),
+            }
+            store.setProjectExperience(newList)
+          }
+          // 保存完整分析结果
+          setAnalysisResult((prev) => ({ ...prev, [index]: result }))
+          if (result.interview_prep) {
+            store.setInterviewPrep(result)
+          }
+          setAnalyzeProgress('')
+          break
+        }
+
+        if (status.status === 'error') {
+          throw new Error(status.error || '分析任务失败')
+        }
+        // status === 'processing' → 继续轮询
       }
     } catch (err) {
       setError(err.message || '项目分析失败')
+      setAnalyzeProgress('')
     } finally {
       setAnalyzing(-1)
-      // 清空 file input，允许重复上传同一文件
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
   // ===== 点击"AI 生成简历" =====
   async function handleGenerate() {
-    if (!store.targetPosition) {
-      setError('请先填写目标岗位')
+    // 硬校验：必填字段不能为空
+    const missing = []
+    if (!store.personal?.name?.trim()) missing.push('姓名')
+    if (!store.personal?.phone?.trim()) missing.push('手机号')
+    if (!store.personal?.email?.trim()) missing.push('邮箱')
+    if (!store.targetPosition?.trim()) missing.push('目标岗位')
+
+    if (missing.length > 0) {
+      setError(`请先填写必填信息：${missing.join('、')}`)
+      if (missing.includes('姓名') || missing.includes('手机号') || missing.includes('邮箱')) {
+        store.setCurrentStep(1)
+      } else if (missing.includes('目标岗位')) {
+        store.setCurrentStep(2)
+      }
       return
+    }
+
+    // 检测实质空输入：用户只填了基本信息，教育/经历/项目/技能全空
+    const isEmpty = store.isEffectivelyEmpty()
+
+    if (isEmpty) {
+      const confirmed = window.confirm(
+        '你尚未填写教育经历、工作/项目经历和技能证书。\n\n' +
+        '将为你生成【求职准备指导】：根据目标岗位分析你需要学习哪些技能、积累哪些项目经验、准备哪些面试问题。\n\n' +
+        '是否确认生成？'
+      )
+      if (!confirmed) return
+    } else {
+      // 有实质数据，走正常简历生成流程
+      const emptyFields = []
+      if (!store._editedEducation && store.education.length === 0) emptyFields.push('教育经历')
+      if (!store._editedExperience && !store._editedProjects &&
+          store.workExperience.length === 0 && store.projectExperience.length === 0) {
+        emptyFields.push('工作/项目经历')
+      }
+      if (!store._editedSkills && !store.skills?.trim()) emptyFields.push('技能证书')
+
+      if (emptyFields.length > 0) {
+        const confirmed = window.confirm(
+          `以下内容尚未填写：${emptyFields.join('、')}。\n\nAI 在这些信息为空时不会编造内容，生成的简历中相关板块将显示为空。\n\n是否确认生成？`
+        )
+        if (!confirmed) return
+      }
     }
 
     setLoading(true)
@@ -177,7 +252,6 @@ export default function FormPage() {
       const data = store.buildRequestData()
       const result = await generateResume(data)
       store.setGeneratedResume(result)
-      // 显示 toast 后跳转
       setToastVisible(true)
       setTimeout(() => {
         navigate('/preview')
@@ -247,7 +321,7 @@ export default function FormPage() {
                 required
               />
               <p className="text-sm text-[#86868b] mt-1.5">
-                AI 会根据目标岗位调整简历的侧重点和关键词
+                AI 会根据目标岗位调整简历的侧重点和关键词。建议在招聘软件先选好岗位，切换到"粘贴招聘信息"将 JD 粘贴过来，匹配效果会更精准。
               </p>
             </div>
           )}
@@ -270,7 +344,7 @@ export default function FormPage() {
                 rows={8}
               />
               <p className="text-sm text-[#86868b] mt-1.5">
-                AI 会根据 JD 中的关键词精准调整简历，突出匹配的技能和经历
+                AI 会从 JD 中提取关键词，精准调整简历的侧重点和技能展示。JD 信息越完整，匹配效果越好。
               </p>
             </div>
           )}
@@ -295,7 +369,13 @@ export default function FormPage() {
             </button>
           </div>
           {list.length === 0 && (
-            <p className="text-[#86868b] text-sm text-center py-12">还没有添加教育经历，点上方"+ 添加一段"</p>
+            <div className="bg-[#f5f5f7] rounded-xl p-5 text-center">
+              <p className="text-[#6e6e73] text-sm mb-2">还没有添加教育经历</p>
+              <p className="text-[#86868b] text-xs">
+                填写学校、专业、学历可以让简历更完整，HR 通常会优先查看教育背景。
+                相关课程也可以写上，AI 会根据目标岗位智能筛选最匹配的课程展示。
+              </p>
+            </div>
           )}
           {list.map((edu, i) => (
             <div key={i} className="glass rounded-xl p-5 mb-4 relative">
@@ -358,11 +438,15 @@ export default function FormPage() {
       return (
         <div className="animate-fade-in">
           <h3 className="text-xl font-bold text-[#1d1d1f] mb-1">经历</h3>
-          <p className="text-sm text-[#86868b] mb-6">
+          <p className="text-sm text-[#86868b] mb-3">
             工作经历和项目经历可以自由混合添加
             {store.targetPosition && (
               <span className="ml-2 text-[#0071e3]/80">· 目标：{store.targetPosition}</span>
             )}
+          </p>
+          <p className="text-xs text-[#86868b] mb-6">
+            校园经历也可以写——社团活动、公益活动、课程大作业、学院活动执行等，
+            AI 都会帮你润色成专业的表达。填得越详细，产出越有竞争力。
           </p>
 
           {/* 两个添加按钮 */}
@@ -376,7 +460,16 @@ export default function FormPage() {
           </div>
 
           {totalExp === 0 && (
-            <p className="text-[#86868b] text-sm text-center py-12">还没有添加经历，点击上方按钮添加</p>
+            <div className="bg-[#f5f5f7] rounded-xl p-5 text-center">
+              <p className="text-[#6e6e73] text-sm mb-2">还没有添加经历</p>
+              <p className="text-[#86868b] text-xs mb-3">
+                经历是简历最核心的板块。如果你有项目源代码或文档，
+                可以添加项目经历后点击"导入项目文件深度分析"，AI 会自动提取技术栈和亮点。
+              </p>
+              <p className="text-[#86868b] text-xs">
+                支持格式：.zip、.docx、.pdf、.txt、.md
+              </p>
+            </div>
           )}
 
           {/* 工作经历卡片 */}
@@ -453,7 +546,7 @@ export default function FormPage() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
-                      分析中...
+                      {analyzeProgress || '分析中...'}
                     </span>
                   ) : '导入项目文件深度分析'}
                 </button>
@@ -463,6 +556,7 @@ export default function FormPage() {
                   </span>
                 )}
               </div>
+              <p className="text-xs text-[#86868b] mt-1.5 ml-1">支持 .zip / .docx / .pdf / .txt / .md 格式，AI 会自动提取技术栈和项目亮点</p>
             </div>
           ))}
 
@@ -499,10 +593,13 @@ export default function FormPage() {
               </svg>
               <p className="text-sm text-[#1d1d1f] font-semibold">准备生成简历</p>
             </div>
-            <p className="text-xs text-[#86868b] ml-6.5">
+            <p className="text-xs text-[#86868b] ml-6.5 mb-2">
               点击下方按钮，AI 将根据你的目标岗位
               {store.jobDescription ? '和招聘信息' : ''}
               智能润色所有经历，生成专业简历。
+            </p>
+            <p className="text-xs text-[#0071e3]/70 ml-6.5">
+              提示：你填写的内容越多，AI 生成的简历越有竞争力。如果前面步骤有跳过的，现在还可以返回补充。
             </p>
           </div>
         </div>

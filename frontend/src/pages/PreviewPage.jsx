@@ -697,6 +697,39 @@ export default function PreviewPage() {
                   </div>
                 </div>
               )}
+              {editData.jd_analysis?.matched_projects?.length > 0 && (
+                <div>
+                  <p className="text-xs text-[#86868b] mb-2 uppercase tracking-wider">匹配项目</p>
+                  <div className="space-y-1.5">
+                    {editData.jd_analysis.matched_projects.map((p, i) => (
+                      <div key={i} className="flex items-start gap-2 text-sm text-[#1d1d1f]">
+                        <span className="text-[#34c759] mt-0.5 flex-shrink-0">&#10003;</span>
+                        <span>{p}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {editData.jd_analysis?.gaps?.length > 0 && (
+                <div>
+                  <p className="text-xs text-[#86868b] mb-2 uppercase tracking-wider">差距分析</p>
+                  <div className="space-y-3">
+                    {editData.jd_analysis.gaps.map((g, i) => (
+                      <div key={i} className="bg-[#fff8f0] border border-[#ffe0b2] rounded-lg p-3">
+                        <div className="flex items-start gap-2 mb-1.5">
+                          <span className="text-[#ff9500] mt-0.5 flex-shrink-0 text-sm">&#9888;</span>
+                          <span className="text-sm font-medium text-[#1d1d1f]">{g.gap}</span>
+                        </div>
+                        {g.suggestion && (
+                          <p className="text-xs text-[#6e6e73] ml-6">
+                            <span className="text-[#0071e3] font-medium">建议：</span>{g.suggestion}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </SectionCard>
         )}

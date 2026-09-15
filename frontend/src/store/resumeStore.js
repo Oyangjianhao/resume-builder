@@ -10,6 +10,13 @@ const useResumeStore = create(
   persist(
     (set, get) => ({
 
+    // ===== 会话标记：逐类别追踪用户是否在当前会话中编辑过 =====
+    // 不持久化——每次页面加载全部重置为 false
+    _editedEducation: false,
+    _editedExperience: false,
+    _editedProjects: false,
+    _editedSkills: false,
+
     // ===== 分步表单 =====
     currentStep: 1,
     nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 5) })),
@@ -33,44 +40,50 @@ const useResumeStore = create(
 
     // ===== 第 3 步：教育经历 =====
     education: [],
-    setEducation: (education) => set({ education }),
+    setEducation: (education) => set({ education, _editedEducation: true }),
     addEducation: () => set((s) => ({
       education: [...s.education, {
         school: '', major: '', degree: '',
         startYear: '', endYear: '', gpa: '', courses: ''
-      }]
+      }],
+      _editedEducation: true
     })),
     removeEducation: (index) => set((s) => ({
-      education: s.education.filter((_, i) => i !== index)
+      education: s.education.filter((_, i) => i !== index),
+      _editedEducation: true
     })),
 
     // ===== 第 4 步：工作经历 =====
     workExperience: [],
-    setWorkExperience: (workExperience) => set({ workExperience }),
+    setWorkExperience: (workExperience) => set({ workExperience, _editedExperience: true }),
     addWorkExperience: () => set((s) => ({
       workExperience: [...s.workExperience, {
         company: '', role: '', startDate: '', endDate: '', description: ''
-      }]
+      }],
+      _editedExperience: true
     })),
     removeWorkExperience: (index) => set((s) => ({
-      workExperience: s.workExperience.filter((_, i) => i !== index)
+      workExperience: s.workExperience.filter((_, i) => i !== index),
+      _editedExperience: true
     })),
 
     // ===== 第 4 步：项目经历 =====
     projectExperience: [],
-    setProjectExperience: (projectExperience) => set({ projectExperience }),
+    setProjectExperience: (projectExperience) => set({ projectExperience, _editedProjects: true }),
     addProjectExperience: () => set((s) => ({
       projectExperience: [...s.projectExperience, {
         name: '', startDate: '', endDate: '', description: ''
-      }]
+      }],
+      _editedProjects: true
     })),
     removeProjectExperience: (index) => set((s) => ({
-      projectExperience: s.projectExperience.filter((_, i) => i !== index)
+      projectExperience: s.projectExperience.filter((_, i) => i !== index),
+      _editedProjects: true
     })),
 
     // ===== 第 5 步：技能证书 =====
     skills: '',
-    setSkills: (skills) => set({ skills }),
+    setSkills: (skills) => set({ skills, _editedSkills: true }),
 
     // ===== AI 生成结果 =====
     generatedResume: null,
@@ -80,9 +93,26 @@ const useResumeStore = create(
     interviewPrep: null,
     setInterviewPrep: (interviewPrep) => set({ interviewPrep }),
 
+    // ===== 判断当前数据是否为实质空输入（仅含基本信息骨架） =====
+    isEffectivelyEmpty: () => {
+      const s = get()
+      const hasRealEducation = s.education.some(e =>
+        e.school || e.major || e.degree
+      )
+      const hasRealWork = s.workExperience.some(e =>
+        e.company || e.role || e.description
+      )
+      const hasRealProject = s.projectExperience.some(e =>
+        e.name || e.description
+      )
+      return !hasRealEducation && !hasRealWork && !hasRealProject && !s.skills.trim()
+    },
+
     // ===== 构建请求数据（给后端 API 用） =====
     buildRequestData: () => {
       const s = get()
+
+      // 核心修复：逐类别检测——用户没编辑过的类别，数据来自 localStorage 旧缓存，丢弃
       return {
         personal: {
           name: s.personal.name,
@@ -90,29 +120,28 @@ const useResumeStore = create(
           email: s.personal.email,
           self_intro: s.personal.selfIntro,
         },
-        education: s.education.map(e => ({
-          school: e.school,
-          major: e.major,
-          degree: e.degree,
-          start_year: e.startYear,
-          end_year: e.endYear,
-          gpa: e.gpa,
-          courses: e.courses,
-        })),
-        experience: s.workExperience.map(e => ({
-          company: e.company,
-          role: e.role,
-          start_date: e.startDate,
-          end_date: e.endDate,
-          description: e.description,
-        })),
-        project_experience: s.projectExperience.map(e => ({
-          name: e.name,
-          start_date: e.startDate,
-          end_date: e.endDate,
-          description: e.description,
-        })),
-        skills: s.skills,
+        education: s._editedEducation
+          ? s.education.map(e => ({
+              school: e.school, major: e.major, degree: e.degree,
+              start_year: e.startYear, end_year: e.endYear,
+              gpa: e.gpa, courses: e.courses,
+            }))
+          : [],
+        experience: s._editedExperience
+          ? s.workExperience.map(e => ({
+              company: e.company, role: e.role,
+              start_date: e.startDate, end_date: e.endDate,
+              description: e.description,
+            }))
+          : [],
+        project_experience: s._editedProjects
+          ? s.projectExperience.map(e => ({
+              name: e.name,
+              start_date: e.startDate, end_date: e.endDate,
+              description: e.description,
+            }))
+          : [],
+        skills: s._editedSkills ? s.skills : '',
         target_position: s.targetPosition,
         job_description: s.jobDescription,
       }
@@ -130,9 +159,24 @@ const useResumeStore = create(
       skills: '',
       generatedResume: null,
       interviewPrep: null,
+      _editedEducation: false,
+      _editedExperience: false,
+      _editedProjects: false,
+      _editedSkills: false,
     }),
   }),
-    { name: 'resume-storage', version: 2 }
+    {
+      name: 'resume-storage',
+      version: 3,
+      // 不持久化 _edited* 标记——每次页面加载都重置为 false
+      partialize: (state) => {
+        const {
+          _editedEducation, _editedExperience,
+          _editedProjects, _editedSkills, ...persistable
+        } = state
+        return persistable
+      },
+    }
   )
 )
 

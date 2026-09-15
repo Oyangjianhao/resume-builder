@@ -1,8 +1,10 @@
 """
 项目深度分析服务
 分层策略：全局理解 → 核心模块深入 → 综合生成
+Phase1（全局理解）与 Phase2（核心代码分析）并行执行
 """
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL
 from models.schemas import AnalysisResponse, InterviewPrep, LikelyQuestion
@@ -11,7 +13,7 @@ from services.file_parser import filter_core_files
 import requests
 
 
-def analyze_project(parsed_files: dict, user_description: str, target_position: str = "", job_description: str = "") -> AnalysisResponse:
+def analyze_project(parsed_files: dict, user_description: str, target_position: str = "", job_description: str = "", progress_callback=None) -> AnalysisResponse:
     """
     主入口：接收解析后的文件数据，执行分层分析
 
@@ -19,25 +21,37 @@ def analyze_project(parsed_files: dict, user_description: str, target_position: 
     user_description: 用户对项目的简单描述
     target_position: 目标岗位（可选）
     job_description: 目标岗位的招聘信息/JD（可选，用于精准匹配面试问题）
+    progress_callback: 可选回调，接收进度描述字符串
     """
     total_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
-    # === 第一层：全局理解 ===
-    phase1_result, usage1 = _phase1_global_understanding(
-        parsed_files["dir_structure"],
-        parsed_files["files"],
-        user_description,
-    )
-    _accumulate_tokens(total_tokens, usage1)
-
-    # === 第二层：核心模块深入 ===
+    # === 第一层 + 第二层：并行执行（无依赖关系） ===
     core_files = filter_core_files(parsed_files.get("files", []), max_files=8)
-    phase2_result, usage2 = _phase2_core_analysis(core_files, phase1_result)
+    if progress_callback:
+        progress_callback("phase1+2")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future1 = executor.submit(
+            _phase1_global_understanding,
+            parsed_files["dir_structure"],
+            parsed_files["files"],
+            user_description,
+        )
+        future2 = executor.submit(_phase2_core_analysis, core_files)
+
+        # 等两个都完成
+        phase1_result, usage1 = future1.result()
+        phase2_result, usage2 = future2.result()
+
+    _accumulate_tokens(total_tokens, usage1)
     _accumulate_tokens(total_tokens, usage2)
 
     # === 第三层：综合生成（内部做两次 AI 调用，返回累计 token） ===
+    if progress_callback:
+        progress_callback("phase3a")
     final_result, phase3_tokens = _phase3_generate(
-        phase1_result, phase2_result, user_description, target_position, job_description
+        phase1_result, phase2_result, user_description, target_position, job_description,
+        progress_callback=progress_callback,
     )
     total_tokens["input_tokens"] += phase3_tokens.get("input_tokens", 0)
     total_tokens["output_tokens"] += phase3_tokens.get("output_tokens", 0)
@@ -105,8 +119,8 @@ def _phase1_global_understanding(dir_structure: str, files: list[dict], user_des
     return _safe_parse_json(content), usage
 
 
-def _phase2_core_analysis(core_files: list[dict], phase1_result: dict) -> tuple:
-    """第二层：深入分析核心模块代码"""
+def _phase2_core_analysis(core_files: list[dict]) -> tuple:
+    """第二层：深入分析核心模块代码（与 Phase1 并行，不再依赖 Phase1 结果）"""
     if not core_files:
         return {"analysis": "无核心文件可分析"}, {}
 
@@ -115,8 +129,7 @@ def _phase2_core_analysis(core_files: list[dict], phase1_result: dict) -> tuple:
     for f in core_files:
         files_text += f"\n--- {f['path']} ---\n{f['content'][:8000]}\n"
 
-    prompt = f"""你是一个技术项目分析专家。以下是项目的核心代码文件，项目概况如下：
-{json.dumps(phase1_result, ensure_ascii=False, indent=2)}
+    prompt = f"""你是一个技术项目分析专家。以下是项目的核心代码文件。
 
 ## 核心代码文件
 {files_text}
@@ -145,7 +158,7 @@ def _phase2_core_analysis(core_files: list[dict], phase1_result: dict) -> tuple:
     return _safe_parse_json(content), usage
 
 
-def _phase3_generate(phase1: dict, phase2: dict, user_description: str, target_position: str, job_description: str = "") -> tuple:
+def _phase3_generate(phase1: dict, phase2: dict, user_description: str, target_position: str, job_description: str = "", progress_callback=None) -> tuple:
     """第三层：综合前两层分析，生成简历描述 + 面试准备清单（分两次 AI 调用）"""
     has_jd = bool(job_description.strip())
     total_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
@@ -252,6 +265,8 @@ def _phase3_generate(phase1: dict, phase2: dict, user_description: str, target_p
     relevance = main_result.get("jd_project_relevance", "high") if has_jd else ""
     project_brief = main_result.get("project_brief", user_description or "")
 
+    if progress_callback:
+        progress_callback("phase3b")
     interview_result, usage_b = _generate_interview_prep(
         job_description=job_description if has_jd else "",
         target_position=target_position,

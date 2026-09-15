@@ -29,9 +29,9 @@ class ProjectExperience(BaseModel):
 
 
 class UserInfo(BaseModel):
-    name: str = Field(description="姓名")
-    phone: str = Field(description="手机号码")
-    email: str = Field(description="邮箱地址")
+    name: str = Field(min_length=1, description="姓名")
+    phone: str = Field(min_length=1, description="手机号码")
+    email: str = Field(min_length=1, description="邮箱地址")
     self_intro: str = Field(default="", description="简短自我介绍（选填）")
 
 
@@ -42,7 +42,7 @@ class ResumeRequest(BaseModel):
     experience: list[Experience] = Field(default=[], description="工作经历列表")
     project_experience: list[ProjectExperience] = Field(default=[], description="项目经历列表")
     skills: str = Field(default="", description="技能与证书，例如：Java, MySQL, CET-4")
-    target_position: str = Field(description="目标岗位，例如：Java后端开发工程师")
+    target_position: str = Field(min_length=1, description="目标岗位，例如：Java后端开发工程师")
     job_description: str = Field(default="", description="目标岗位的招聘信息（选填），用于精准匹配")
 
 
